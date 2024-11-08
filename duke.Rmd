@@ -1,0 +1,5353 @@
+---
+title: "Duke"
+author: "Michael Flower"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    number_sections: false
+    code_folding: hide
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+``` {r environment, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, results='hide'}
+
+# Set working directory where this file is stored
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+# Required packages
+packages <- c("plyr", "dplyr", "tidyr", "ggplot2", "readxl", "pbapply", "rBLAST", "ShortRead",
+              "data.table", "scales", "forcats", "purrr", "stringr", "msa","openxlsx", 
+              "kableExtra", "broom", "cluster", "viridis", "Rsamtools")
+
+# # Install R packages if required
+# install.packages(setdiff(packages, rownames(installed.packages())))
+
+# # Install bioconductor packages if required
+# BiocManager::install(setdiff(packages, rownames(installed.packages())))
+# invisible(lapply(packages, function(x) library(x, character.only=TRUE)))
+
+# Load
+lapply(packages, library, character.only = TRUE)
+rm(packages)
+
+## Clear objects
+# rm(list = ls()) # This would cause rmarkdown to error
+
+```
+
+
+# Variables
+
+``` {r set_variables, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Import path (no spaces)
+# data_dir = "/Users/michaelflower/my_bin/othello/demo/2024.09.18_MRV_and_EMAST/data"
+# data_dir = "/Users/michaelflower/my_bin/othello/demo/2024.09.18_MRV_and_EMAST/data_temp"
+data_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/data"
+# data_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.24_diagnostics_saskia/data"
+# data_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.24_diagnostics_saskia/data_dev"
+# data_dir = "/Users/michaelflower/my_bin/othello/demo/2024.11.05_drishti/data"
+
+# Import data
+import_patterns = c("\\.fastq$", "\\.fastq.gz$", "\\.fasta$", "\\.fa$", "\\.bam$")
+import_recursive = TRUE
+# import_random_sample = 20000 # NA
+import_random_sample = NA
+
+# Manual read exclusion path
+# manual_read_exclusion_path = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/data/manual_read_exclusion_flanks.xlsx"
+manual_read_exclusion_path = NA
+
+# Paired reads
+r1_pattern = "_R1_" # Define regex patterns for R1 and R2 identification
+r2_pattern = "_R2_"
+select_one_of_pair = "R1" # NA
+
+# Trim sequences
+trim_path = "/Users/michaelflower/refs/adapters/adapters.csv"
+# trim_sequences = c("ampliconez_f" = "ACACTCTTTCCCTACACGACGCTCTTCCGATC",
+#                    "ampliconez_r" = "GACTGGAGTTCAGACGTGTGCTCTTCCGATCT")
+trim_max_mismatch = 4
+trim_with_indels = TRUE
+
+# Output directory (no spaces)
+# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.09.18_MRV_and_EMAST/results"
+# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_dev"
+# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_dev2"
+# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_dev3"
+# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results"
+# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_readexclusion"
+out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_recolour"
+# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_recolour_readexclusion"
+# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.24_diagnostics_saskia/results_dev"
+# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.24_diagnostics_saskia/results"
+# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.11.05_drishti/results"
+
+# Plot formats
+plot_formats = c(".png")
+
+# Alignment reference
+# ref_path = "/Users/michaelflower/refs/rep/HTT/HTT_fixed_flanks_separate/HTT_fixed_flanks_separate.fasta"
+ref_path = "/Users/michaelflower/refs/rep/C9orf72/C9orf72_ensembl_flanks_separate.fasta"
+
+# # Alignment settings
+minimap2_preset = "map-ont" # "map-hifi", "map_pb", "sr"
+# minimap2_preset = "sr"
+minimap2_kmer = 10 # kmer length (15)
+minimap2_ms = 2 # matching score (2), added for each matching base. To prioritise shorter alignments decrease A. To favour longer alignments increase A.
+minimap2_mcs = 15 # minimum chaining score (40). Minimum score for a chain of bases to be considered an alignment. Lower allows weaker alignments.
+minimap2_secondary = "yes" # default (yes).
+
+# minimap2_preset = "sr"
+# minimap2_kmer = 6
+# minimap2_ms = 2
+# minimap2_mcs = 2
+# minimap2_secondary = "yes"
+
+
+# Repeat finder
+# rpt_pattern = "CAG"
+# min_repeats = 3 # repeat units
+# max_mismatch = 0 # per repeat unit
+# start_perfect_repeats = 2
+# end_perfect_repeats = 2
+# max_repeat_gap = 6
+# max_tract_gap = 15
+# rpt_return_option = "longest"
+rpt_pattern = "GGGGCC"
+min_repeats = 2 # repeat units
+max_mismatch = 0 # per repeat unit
+start_perfect_repeats = 1
+end_perfect_repeats = 1
+# max_repeat_gap = 18
+# max_tract_gap = 100
+max_repeat_gap = 60
+max_tract_gap = 1500
+rpt_return_option = "longest"
+
+# General plot attributes
+x_breaks = 10
+base_text_size = 18
+
+# Repeat distribution plots
+# binwidth = 1
+binwidth = 5
+datapoint_range = c(100, 20000)
+point_size_range = c(0.05, 2)
+alpha_range = c(0.05, 0.5)
+
+# Sequence summary
+sumseq_min_repeat_length = 3
+sumseq_max_repeat_length = 12
+sumseq_exclude_repeat_lengths = NA
+sumseq_prefer_short_or_long = "short" # long
+
+# Peak finder
+max_peaks = 1
+peak_tie_break = "largest" # smallest, NA
+peak_option = "mode" # local_maxima, mean
+# split_peak_threshold = 36
+split_peak_threshold = 50
+peak_floor = 0.1 # 1 # For values <1 it's interpreted as a proportion of the commonest repeat length, and repeat lengths with a lower frequency are excluded. For values >=1 it's interpreted as an absolute frequency, and repeat lengths with lower frequency are excluded. Setting to 1 does not filter out any repeat lengths.
+
+# DNA colours
+dna_colours = c("A" = "darkgreen", "C" = "blue", "T" = "red", "G" = "black", "-" = "lightgrey")
+dna_labels = c("A" = "A", "C" = "C", "T" = "T", "G" = "G", "-" = "-")
+repeat_recolour = "purple" # blend
+# repeat_recolour = NA
+
+# Analysis window
+analysis_window = 200
+
+# Waterfall
+read_count_cutpoints = c(0, 30, 50, 100, 200, 500, 1000, 5000)
+label_display_steps = c(1, 3, 5, 10, 20, 50, 100, 500)
+
+# Cluster
+max_clusters = 2
+# max_clusters = 1
+optimal_cluster_method = "silhouette" # elbow
+# split_clustering_threshold = 36
+split_clustering_threshold = 50
+
+# Focus region
+focus_column = "mid.3"
+focus_proportion_threshold = 0.1
+# focus_column = NA
+# focus_proportion_threshold = NA
+
+# Consensus
+msa_outlier_threshold = 0.25 # x*sd below the mean msa score
+remove_msa_outliers = TRUE
+msa_random_sample = 100
+# msa_random_sample = NA
+consensus_full_sequence = FALSE
+
+# Clean
+remove_temp = FALSE
+save_dataset = TRUE
+# save_dataset = FALSE
+
+```
+
+
+``` {r write_excel_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+write_excel_function <- function(named_list, path, overwrite_sheet = TRUE) {
+  
+  # Load existing workbook if it exists; otherwise, create a new one
+  if (file.exists(path)) {
+    wb <- loadWorkbook(path)
+  } else {
+    wb <- createWorkbook()
+  }
+  
+  # Function to truncate names to max 31 characters
+  truncate_name <- function(name, max_length = 31) {
+    if (nchar(name) > max_length) {
+      return(paste0(substr(name, 1, max_length - 2), ".."))
+    } else {
+      return(name)
+    }
+  }
+  
+  # Add or update sheets in the workbook
+  for (table_name in names(named_list)) {
+    
+    # Truncate table_name if it exceeds Excel's limit
+    truncated_name <- truncate_name(table_name)
+    
+    # If sheet with this name already exists
+    if (truncated_name %in% names(wb)) {
+      
+      if (overwrite_sheet) {
+        
+        # Overwrite existing sheet
+        removeWorksheet(wb, truncated_name)
+        export_name <- truncated_name
+        
+      } else {
+        
+        # Add a suffix to the name
+        suffix <- 1
+        new_name <- paste0(truncated_name, "_", suffix)
+        while (new_name %in% names(wb)) {
+          suffix <- suffix + 1
+          new_name <- paste0(truncated_name, "_", suffix)
+        }
+        export_name <- new_name
+        
+      }
+    } else {
+      export_name <- truncated_name
+    }
+    
+    # Add the new sheet and write data
+    addWorksheet(wb, export_name)
+    
+    # Write data to the workbook
+    writeData(wb, export_name, named_list[[table_name]])
+  }
+  
+  # Save the workbook, overwriting if it already exists
+  saveWorkbook(wb, file = path, overwrite = TRUE)
+  
+}
+
+```
+
+
+``` {r display_variables, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# List of variables
+variable_list <- list(
+  "import" = list(
+    data_dir = data_dir,
+    import_patterns = import_patterns,
+    import_recursive = import_recursive,
+    import_random_sample = import_random_sample,
+    manual_read_exclusion_path = manual_read_exclusion_path
+  ),
+  "paired_reads" = list(
+    r1_pattern = r1_pattern,
+    r2_pattern = r2_pattern,
+    select_one_of_pair = select_one_of_pair
+  ),
+  "trim" = list(
+    trim_path = trim_path,
+    trim_max_mismatch = trim_max_mismatch,
+    trim_with_indels = trim_with_indels
+  ),
+  "output" = list(
+    out_dir = out_dir,
+    plot_formats = plot_formats
+  ),
+  "alignment" = list(
+    ref_path = ref_path,
+    minimap2_preset = minimap2_preset,
+    minimap2_kmer = minimap2_kmer,
+    minimap2_ms = minimap2_ms,
+    minimap2_mcs = minimap2_mcs,
+    minimap2_secondary = minimap2_secondary
+  ),
+  "repeat_finder" = list(
+    rpt_pattern = rpt_pattern,
+    min_repeats = min_repeats,
+    max_mismatch = max_mismatch,
+    start_perfect_repeats = start_perfect_repeats,
+    end_perfect_repeats = end_perfect_repeats,
+    max_repeat_gap = max_repeat_gap,
+    max_tract_gap = max_tract_gap,
+    rpt_return_option = rpt_return_option
+  ),
+  "plot" = list(
+    x_breaks = x_breaks,
+    base_text_size = base_text_size
+  ),
+  "repeat_distribution" = list(
+    binwidth = binwidth,
+    datapoint_range = datapoint_range,
+    point_size_range = point_size_range,
+    alpha_range = alpha_range
+  ),
+  "sequence_summary" = list(
+    sumseq_min_repeat_length = sumseq_min_repeat_length,
+    sumseq_max_repeat_length = sumseq_max_repeat_length,
+    sumseq_exclude_repeat_lengths = sumseq_exclude_repeat_lengths,
+    sumseq_prefer_short_or_long = sumseq_prefer_short_or_long
+  ),
+  "peak_finder" = list(
+    max_peaks = max_peaks,
+    peak_tie_break = peak_tie_break,
+    peak_option = peak_option,
+    split_peak_threshold = split_peak_threshold,
+    peak_floor = peak_floor
+  ),
+  "dna_colours" = list(
+    dna_colours = dna_colours,
+    dna_labels = dna_labels,
+    repeat_recolour = repeat_recolour
+  ),
+  "analysis_window" = list(
+    analysis_window = analysis_window
+  ),
+  "waterfall_plot" = list(
+    read_count_cutpoints = read_count_cutpoints,
+    label_display_steps = label_display_steps
+  ),
+  "clustering" = list(
+    max_clusters = max_clusters,
+    optimal_cluster_method = optimal_cluster_method,
+    split_clustering_threshold = split_clustering_threshold
+  ),
+  "focus_region" = list(
+    focus_column = focus_column,
+    focus_proportion_threshold = focus_proportion_threshold
+  ),
+  "consensus" = list(
+    msa_outlier_threshold = msa_outlier_threshold,
+    remove_msa_outliers = remove_msa_outliers,
+    msa_random_sample = msa_random_sample,
+    consensus_full_sequence = consensus_full_sequence
+  ),
+  "clean" = list(
+    remove_temp = remove_temp,
+    save_dataset = save_dataset
+  )
+)
+
+# Convert list into a dataframe
+variable_list_names <- setNames(names(variable_list), names(variable_list))
+variable_table <- lapply(variable_list_names, function(variable_list_name,
+                                             variable_list) {
+  data.frame(variable_group = variable_list_name,
+             variable = names(variable_list[[variable_list_name]]),
+             value = paste(variable_list[[variable_list_name]]))
+},
+variable_list = variable_list)
+
+# Rbind
+variable_table <- rbindlist(variable_table)
+
+# Display
+kbl(variable_table, caption = "Variables") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Create directory
+my_path <- file.path(out_dir, "settings")
+if (!dir.exists(my_path)) {
+  dir.create(my_path)
+}
+
+# Export table
+write_excel_function(named_list = list("variable_table" = variable_table),
+                     path = file.path(my_path, "variables.xlsx"),
+                     overwrite_sheet = TRUE)
+
+```
+
+
+``` {r results_dir, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Results directory
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE)
+}
+
+# Temporary files
+if (!dir.exists(file.path(out_dir, "temp"))) {
+  dir.create(file.path(out_dir, "temp"), recursive = TRUE)
+}
+
+```
+
+
+# Import sequencing data
+
+``` {r file_paths, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# List files
+file_paths <- list.files(data_dir,
+                         full.names = TRUE,
+                         pattern = paste(import_patterns, collapse = "|"),
+                         recursive = import_recursive)
+
+
+# Extract file names
+file_names <- basename(file_paths)
+
+# Extract file stems, first removing gz double extensions
+file_stems <- gsub("\\.gz$", "", file_names)
+file_stems <- tools::file_path_sans_ext(file_stems)
+
+# Extract formats
+file_formats <- ifelse(grepl("\\.gz$", file_names), 
+                       paste0(tools::file_ext(gsub("\\.gz$", "", file_names)), ".gz"), 
+                       tools::file_ext(file_names))
+
+# Vector of file names
+file_name_vector <- setNames(file_names, file_names)
+file_stem_vector <- setNames(file_stems, file_stems)
+
+
+# Table of file details
+file_details <- data.frame(file_name = file_names,
+                           file_stem = file_stems,
+                           file_format = file_formats,
+                           file_path = file_paths) %>%
+  dplyr::mutate(paired = grepl(r1_pattern, file_name) | grepl(r2_pattern, file_name),
+                paired_read_direction = case_when(grepl(r1_pattern, file_name) ~ "R1",
+                                                  grepl(r2_pattern, file_name) ~ "R2",
+                                                  TRUE ~ NA),
+                include = case_when(paired & paired_read_direction == select_one_of_pair ~ TRUE,
+                                    paired ~ FALSE,
+                                    TRUE ~ TRUE),
+                sample_stem = ifelse(paired, gsub("_R[12]_.*", "", file_name), file_stem)) %>%
+  dplyr::relocate(c(sample_stem, file_format, paired, paired_read_direction, include), 
+                  .after = "file_stem")
+
+# Table of file formats
+data.frame(table(file_formats)) %>%
+  dplyr::rename(file_format = file_formats,
+                count = Freq) %>%
+  kbl(caption = "File formats") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Count single and paired samples
+file_details %>%
+  distinct(sample_stem, paired) %>%
+  group_by(paired) %>%
+  dplyr::summarise(count = n()) %>%
+  kbl(caption = "Count samples with single and paired end sequencing") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Display full file details table
+kbl(file_details, caption = "File details") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                font_size = 8)
+
+# Create directory
+my_path <- file.path(out_dir, "qc")
+if (!dir.exists(my_path)) {
+  dir.create(my_path)
+}
+
+# Export table
+write_excel_function(named_list = list("file_details" = file_details),
+                     path = file.path(my_path, "qc.xlsx"),
+                     overwrite_sheet = TRUE)
+
+```
+
+
+``` {r select_one_of_pair, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+if (!is.na(select_one_of_pair)) {
+  
+  # Files to keep
+  file_stem_keep <- file_details %>%
+    dplyr::filter(include)
+  file_stem_keep <- file_stem_keep$file_stem
+  
+  # Filter file stem vector
+  file_stem_vector <- file_stem_vector[file_stem_vector %in% file_stem_keep]
+  
+}
+
+```
+
+
+``` {r sequencing_import_functions, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to import fastq including quality data
+fastq_import <- function(path) {
+  readfastq_file <- readFastq(path)
+  read_names <- as.character(ShortRead::id(readfastq_file))
+  # Strip tags from read names by keeping only the first field before the first space
+  clean_read_names <- sapply(strsplit(read_names, " "), `[`, 1)
+  quality_scaled_dnastringset <- 
+      QualityScaledDNAStringSet(sread(readfastq_file), as(quality(readfastq_file), "PhredQuality"))
+  names(quality_scaled_dnastringset) <- clean_read_names
+  return(quality_scaled_dnastringset)
+}
+
+# Function to import fasta files
+fasta_import <- function(path) {
+  readDNAStringSet(path, format = "fasta")
+}
+
+# Function to import bam files
+bam_import <- function(path) {
+  bam_file <- BamFile(path)
+  bam_data <- scanBam(bam_file)
+  bam_sequences <- bam_data[[1]]$seq
+  bam_qualities <- bam_data[[1]]$qual
+  bam_read_names <- bam_data[[1]]$qname
+  quality_scaled_dnastringset <-
+    QualityScaledDNAStringSet(bam_sequences, bam_qualities)
+  names(quality_scaled_dnastringset) <- bam_read_names
+  return(quality_scaled_dnastringset)
+}
+
+# Function to import sequencing files
+import_sequencing <- function(path, format) {
+  if (format == "fastq" || format == "fastq.gz") {
+    return(fastq_import(path))
+  } else if (format == "fasta" || format == "fa") {
+    return(fasta_import(path))
+  } else if (format == "bam") {
+    return(bam_import(path))
+  } else {
+    stop("Unsupported file format")
+  }
+}
+
+```
+
+
+``` {r sequencing_import, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Import sequencing files
+sequencing_files <- pblapply(file_stem_vector, function(file_stem,
+                                                        file_details) {
+  file_path <- file_details$file_path[match(file_stem, file_details$file_stem)]
+  file_format <- file_details$file_format[match(file_stem, file_details$file_stem)]
+  import_sequencing(file_path, file_format)
+},
+file_details = file_details)
+
+```
+
+
+# Remove duplicate read names
+
+``` {r select_longest_duplicate_readname_function, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Function to find duplicate read names and select the longest
+select_longest_duplicate_readname <- function(dna_stringset) {
+  
+  # Table of read names and lengths
+  sequence_table <- data.frame(read_index = seq_along(dna_stringset),
+                               read_name = names(dna_stringset),
+                               sequence = as.character(dna_stringset),
+                               read_length = width(dna_stringset))
+  
+  # Count duplicate read names
+  read_name_count <- sequence_table %>%
+    group_by(read_name) %>%
+    dplyr::summarise(count = n()) %>%
+    ungroup() %>%
+    dplyr::arrange(-count)
+  
+  # Select the longest read for each read_name
+  longest_read <- sequence_table %>%
+    group_by(read_name) %>%
+    dplyr::arrange(desc(read_length), .by_group = TRUE) %>%
+    slice_head(n = 1) %>%
+    ungroup()
+  
+  # Subset the dna_stringset by the indices of the longest reads
+  longest_dna_stringset <- dna_stringset[longest_read$read_index]
+  
+  # Output
+  return(list(read_name_count = read_name_count,
+              dna_stringset = longest_dna_stringset))
+  
+}
+
+```
+
+
+``` {r select_unique_readnames, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Find duplicate read names and select the longest
+my_path <- file.path(out_dir, "temp", "unique_readname_result.RData")
+if (file.exists(my_path)) {
+  load(my_path)
+} else {
+  unique_readname_result <- pblapply(sequencing_files, select_longest_duplicate_readname)
+  save(unique_readname_result, file = my_path)
+}
+
+# Make new sequencing file
+unique_sequencing_files <- lapply(unique_readname_result, "[[", "dna_stringset")
+
+```
+
+
+``` {r count_read_names, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Read name counts
+read_name_count <- lapply(file_stem_vector, function(file_stem,
+                                                     unique_readname_result) {
+  unique_readname_result[[file_stem]][["read_name_count"]] %>%
+    dplyr::mutate(file_stem = file_stem) %>%
+    relocate(file_stem)
+},
+unique_readname_result = unique_readname_result)
+read_name_count <- rbindlist(read_name_count)
+
+# Summarise read name count
+read_name_count_summary <- read_name_count %>%
+  group_by(file_stem, count) %>%
+  dplyr::summarise(n_readnames = n()) %>%
+  ungroup()
+
+# Total number of read names
+total_readnames <- read_name_count %>%
+  group_by(file_stem) %>%
+  dplyr::summarise(total_readnames = n()) %>%
+  ungroup()
+
+# Add total read name count
+read_name_count_summary <- read_name_count_summary %>%
+  left_join(total_readnames, by = join_by(file_stem)) %>%
+  dplyr::mutate(proportion = n_readnames / total_readnames)
+
+```
+
+
+``` {r plot_read_name_count, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, fig.height=5, fig.width=10}
+
+ggplot(read_name_count_summary, aes(x = file_stem, y = proportion)) +
+  geom_bar(aes(fill = as.factor(count)),
+           stat = "identity", position = "stack", colour = "black") +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                   guide = guide_axis(angle = 70)) +
+  scale_y_continuous(breaks = pretty_breaks()) +
+  labs(x = "File stem",
+       y = "Proportion of reads",
+       fill = "Read name\ncount") +
+  theme_bw()
+
+```
+
+
+``` {r compare_read_count_function, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+compare_read_count <- function(dna_stringset1, dna_stringset2, name1 = NULL, name2 = NULL) {
+  
+  # Function to count reads
+  read_count_function <- function(dna_stringset) {
+    data.frame(read_count = unlist(lapply(dna_stringset, length))) %>%
+      tibble::rownames_to_column("file_stem")
+  }
+  
+  # Count reads
+  read_count1 <- read_count_function(dna_stringset1)
+  read_count2 <- read_count_function(dna_stringset2)
+  
+  # Join
+  read_count <- read_count1 %>%
+    left_join(read_count2, 
+              by = join_by(file_stem),
+              suffix = c("1", "2"))
+  
+  # Rename columns
+  if (!is.null(name1)) {
+    read_count <- read_count %>%
+      dplyr::rename(!!sym(name1) := read_count1)
+  }
+  if (!is.null(name2)) {
+    read_count <- read_count %>%
+      dplyr::rename(!!sym(name2) := read_count2)
+  }
+  
+  # Output
+  return(read_count)
+}
+
+```
+
+
+``` {r count_original_vs_unique_readnames, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, fig.height=6, fig.width=8}
+
+# Compare read count
+readcount_unique_readnames <- 
+  compare_read_count(dna_stringset1 = sequencing_files,
+                     dna_stringset2 = unique_sequencing_files,
+                     name1 = "original",
+                     name2 = "unique_read_name")
+
+```
+
+
+``` {r plot_original_vs_unique_readnames, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, fig.height=6, fig.width=10}
+
+# Long format
+readcount_unique_readnames_long <- readcount_unique_readnames %>%
+  pivot_longer(!file_stem, names_to = "dataset", values_to = "read_count")
+
+# Plot
+ggplot(readcount_unique_readnames_long, aes(x = file_stem, y = read_count)) +
+  facet_grid(rows = vars(dataset),
+             labeller = as_labeller(c("original" = "Original",
+                                      "unique_read_name" = "Unique read\nnames"))) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = read_count),
+            angle = 70, vjust = -0.25, hjust = -0.25, size = 2) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                   guide = guide_axis(angle = 70)) +
+  scale_y_continuous(breaks = pretty_breaks(),
+                     expand = expansion(mult = c(NA, 0.3))) +
+  labs(x = "File stem",
+       y = "Read count") +
+  theme_bw()
+
+```
+
+
+``` {r table_original_vs_unique_readnames, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Display table
+kbl(readcount_unique_readnames, caption = "Count unique read names") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Export table
+my_path <- file.path(out_dir, "qc")
+write_excel_function(named_list = list("readcount_unique_readnames" = readcount_unique_readnames),
+                     path = file.path(my_path, "qc.xlsx"),
+                     overwrite_sheet = TRUE)
+
+```
+
+
+# Sample reads
+
+``` {r downsample_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+downsample <- function(dna_stringset, sample_size) {
+  read_count <- length(dna_stringset)
+  if (read_count > sample_size) {
+    set.seed(123) # Allow random processes to be reproducible
+    dna_stringset <- dna_stringset[sample(seq_along(dna_stringset), sample_size)]
+  }
+  return(dna_stringset)
+}
+
+```
+
+
+``` {r downsample, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+if (!is.na(import_random_sample)) {
+  sample_sequencing_files <- pblapply(unique_sequencing_files, downsample, sample_size = import_random_sample)
+} else {
+  sample_sequencing_files <- unique_sequencing_files
+}
+
+```
+
+
+``` {r downsample_read_counts, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Compare read count
+sample_read_count <- 
+  compare_read_count(dna_stringset1 = unique_sequencing_files,
+                     dna_stringset2 = sample_sequencing_files,
+                     name1 = "original",
+                     name2 = "sample")
+
+```
+
+
+``` {r plot_downsample_read_counts, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, fig.height=6, fig.width=8}
+
+# Long format
+sample_read_count_long <- sample_read_count %>%
+  pivot_longer(!file_stem, names_to = "dataset", values_to = "read_count")
+
+# Plot
+ggplot(sample_read_count_long, aes(x = file_stem, y = read_count)) +
+  facet_grid(rows = vars(dataset),
+             labeller = as_labeller(c("original" = "Original",
+                                      "sample" = "Sampled reads")),
+             scales = "free_y") +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = read_count),
+            angle = 70, vjust = -0.25, hjust = -0.25, size = 2) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                   guide = guide_axis(angle = 70)) +
+  scale_y_continuous(breaks = pretty_breaks(),
+                     expand = expansion(mult = c(NA, 0.3))) +
+  labs(x = "File stem",
+       y = "Read count") +
+  theme_bw()
+
+```
+
+
+``` {r table_downsample_read_counts, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Display table
+kbl(sample_read_count, caption = "Sampled read count") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Export table
+my_path <- file.path(out_dir, "qc")
+write_excel_function(named_list = list("sample_read_count" = sample_read_count),
+                     path = file.path(my_path, "qc.xlsx"),
+                     overwrite_sheet = TRUE)
+
+```
+
+
+# Quality
+
+``` {r qc, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Quality and length of each read
+sequencing_qc <- pblapply(file_stem_vector, function(my_file_stem,
+                                                     sample_sequencing_files) {
+  
+  # Extract sequencing file
+  sequencing_file <- sample_sequencing_files[[my_file_stem]]
+  
+  # Check if quality scores exist
+  if(inherits(sequencing_file, "QualityScaledDNAStringSet")) {
+  
+    # Extract qualities
+    quals <- quality(sequencing_file)
+    
+    # Sum -log10 pvalues for each read
+    read_scores <- alphabetScore(quals)
+    
+  } else {
+    
+    # NA if no quality scores
+    read_scores <- rep(NA, length(sequencing_file))
+    
+  }
+  
+  # Read lengths
+  read_lengths <- width(sequencing_file)
+  
+  # Table
+  qc_table <- data.frame(file_stem = rep(my_file_stem, length(sequencing_file)),
+                         read_name = names(sequencing_file),
+                         phred_sum = read_scores,
+                         length = read_lengths) %>%
+    dplyr::mutate(read_phred = phred_sum / length)
+  
+  # Output
+  return(qc_table)
+  
+},
+sample_sequencing_files = sample_sequencing_files)
+  
+
+# Summarise QC
+sequencing_qc_summary <- 
+  rbindlist(sequencing_qc) %>%
+    group_by(file_stem) %>%
+    dplyr::summarise(read_count = n(),
+                     mean_length = mean(length, na.rm = TRUE),
+                     median_length = median(length, na.rm = TRUE),
+                     sd_length = sd(length, na.rm = TRUE),
+                     mean_phred = mean(read_phred, na.rm = TRUE),
+                     median_phred = median(read_phred, na.rm = TRUE),
+                     sd_phred = sd(read_phred, na.rm = TRUE))
+
+```
+
+
+``` {r qc_plot, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+sequencing_qc_summary %>%
+  dplyr::mutate(mean_pred_plot = ifelse(is.na(mean_phred), 0, mean_phred),
+                phred_available = ifelse(!is.na(mean_phred), "Phred available", "Phred unavailable")) %>%
+  ggplot(aes(x = mean_length, y = mean_pred_plot)) +
+  facet_wrap(vars(phred_available), scales = "free") +
+  geom_point(aes(colour = read_count),
+             size = 2, alpha = 0.6) +
+  geom_smooth() +
+  scale_x_continuous(breaks = pretty_breaks()) +
+  scale_y_continuous(breaks = pretty_breaks()) +
+  scale_color_viridis_c(option = "D", direction = 1) +
+  labs(x = "Mean read length (bp)",
+       y = "Mean phred score",
+       colour = "Read count") +
+  theme_minimal()
+
+# https://rockefelleruniversity.github.io/Bioconductor_Introduction/presentations/slides/FastQInBioconductor.html#36
+
+```
+
+
+``` {r qc_table, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Display table
+kbl(sequencing_qc_summary, caption = "Sequencing QC") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                font_size = 8)
+
+# Export table
+my_path <- file.path(out_dir, "qc")
+write_excel_function(named_list = list("sequencing_qc_summary" = sequencing_qc_summary),
+                     path = file.path(my_path, "qc.xlsx"),
+                     overwrite_sheet = TRUE)
+
+```
+
+
+# Trim
+
+``` {r trim_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+trim_reads <- function(dna_stringset, trim_patterns, max_mismatch, with_indels) {
+  
+  # Vector of trim sequence names
+  trim_pattern_names <- setNames(names(trim_patterns), 
+                                 names(trim_patterns))
+  
+  # Log locations of trim sequences
+  trim_locations <- lapply(trim_pattern_names, function(trim_pattern_name,
+                                                        trim_patterns,
+                                                        dna_stringset,
+                                                        max_mismatch,
+                                                        with_indels) {
+    # Extract trim sequence
+    trim_pattern <- trim_patterns[[trim_pattern_name]]
+    
+    # Trim coordinates
+    trim_location <- trimLRPatterns(Lpattern = trim_pattern,
+                                    Rpattern = trim_pattern,
+                                    subject = dna_stringset,
+                                    max.Lmismatch = max_mismatch,
+                                    max.Rmismatch = max_mismatch,
+                                    with.Lindels = with_indels,
+                                    with.Rindels = with_indels,
+                                    ranges = TRUE)
+    
+    # Convert to dataframe
+    trim_location <- as.data.frame(trim_location) %>%
+      dplyr::mutate(trim_pattern_name = trim_pattern_name,
+                    read_name = names(dna_stringset),
+                    read_length = width(dna_stringset)) %>%
+      relocate(c(trim_pattern_name, read_name, read_length))
+    
+    # Output
+    return(trim_location)
+    
+  },
+  trim_patterns = trim_patterns,
+  dna_stringset = dna_stringset,
+  max_mismatch = max_mismatch,
+  with_indels = with_indels)
+  
+  # Rbind
+  trim_locations <- rbindlist(trim_locations) %>%
+    dplyr::mutate(trim_length = read_length - width,
+                  trim = width < read_length)
+  
+  # Trim
+  dna_stringset_trimmed <- dna_stringset
+  for (trim_pattern in trim_patterns) {
+    dna_stringset_trimmed <- trimLRPatterns(Lpattern = trim_pattern,
+                                            Rpattern = trim_pattern,
+                                            subject = dna_stringset_trimmed,
+                                            max.Lmismatch = max_mismatch,
+                                            max.Rmismatch = max_mismatch,
+                                            with.Lindels = with_indels,
+                                            with.Rindels = with_indels)
+  }
+  
+  # Output
+  return(list(trim_locations = trim_locations,
+              dna_stringset_trimmed = dna_stringset_trimmed))
+  
+}
+
+```
+
+
+``` {r trim, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Import trim sequences
+trim_sequences <- read.csv(trim_path)
+trim_sequences <- setNames(trim_sequences$adapter_sequence,
+                           trim_sequences$adapter_name)
+
+# Reverse complement the trim sequences
+trim_sequences_rc <- as.character(reverseComplement(DNAStringSet(trim_sequences)))
+names(trim_sequences_rc) <- paste0(names(trim_sequences_rc), "_rc")
+
+# Combine sense and reverse complement trim sequences
+combined_trim_sequences <- c(trim_sequences, trim_sequences_rc)
+
+# Run trim function
+my_path <- file.path(out_dir, "temp", "trim_result.RData")
+if (file.exists(my_path)) {
+  load(my_path)
+} else {
+  trim_result <- pblapply(sample_sequencing_files, trim_reads,
+                          trim_patterns = combined_trim_sequences,
+                          max_mismatch = trim_max_mismatch,
+                          with_indels = trim_with_indels)
+  save(trim_result, file = my_path)
+}
+
+# Extract trimmed sequencing files
+trimmed_sequencing_files <- lapply(trim_result, "[[", "dna_stringset_trimmed")
+
+```
+
+
+## Proportion of reads trimmed
+
+``` {r trim_proportion, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Extract trim locations
+trim_locations <- lapply(file_stem_vector, function(my_file_stem,
+                                                    trim_result) {
+  trim_result[[my_file_stem]]$trim_locations %>%
+    dplyr::mutate(file_stem = my_file_stem) %>%
+    relocate(file_stem)
+},
+trim_result = trim_result)
+
+# Rbind
+trim_locations <- rbindlist(trim_locations)
+
+# Count trimmed reads by trim sequence for each file
+count_trimmed <- trim_locations %>%
+  group_by(file_stem, trim_pattern_name) %>%
+  dplyr::summarise(read_count = sum(trim)) %>%
+  ungroup()
+
+# Count untrimmed reads
+count_untrimmed <- trim_locations %>%
+  group_by(file_stem, read_name) %>%
+  dplyr::summarise(all_untrimmed = all(!trim)) %>%
+  ungroup() %>%
+  group_by(file_stem) %>%
+  dplyr::summarise(read_count = sum(all_untrimmed)) %>%
+  ungroup()
+
+# Merge trimmed and untrimmed read counts
+count_trimmed <- rbind.fill(count_trimmed, count_untrimmed) %>%
+  arrange(file_stem, trim_pattern_name) %>%
+  dplyr::filter(read_count > 0) %>%
+  dplyr::mutate(trim_pattern_name = ifelse(is.na(trim_pattern_name), "untrimmed", trim_pattern_name))
+
+# Count total reads for each file
+total_reads <- trim_locations %>%
+  distinct(file_stem, read_name) %>%
+  group_by(file_stem) %>%
+  dplyr::summarise(total_reads = n()) %>%
+  ungroup()
+
+# Calculate proportion of reads trimmed
+count_trimmed <- count_trimmed %>%
+  left_join(total_reads, by = join_by(file_stem)) %>%
+  dplyr::mutate(proportion = read_count / total_reads)
+
+# Calculate mean proportion for each trim pattern to reorder the x-axis
+mean_trim <- count_trimmed %>%
+  group_by(trim_pattern_name) %>%
+  dplyr::summarise(mean_proportion = mean(proportion, na.rm = TRUE)) %>%
+  ungroup() %>%
+  arrange(desc(mean_proportion))
+
+# Reorder trim_pattern_name by mean count
+count_trimmed <- count_trimmed %>%
+  mutate(trim_pattern_name = factor(trim_pattern_name, levels = mean_trim$trim_pattern_name))
+
+```
+
+
+``` {r trim_proportion_plot, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+ggplot(count_trimmed, aes(x = trim_pattern_name, y = proportion)) +
+  geom_boxplot(outliers = FALSE) +
+  geom_jitter(height = 0, width = 0.1, alpha = 0.5, size = 3) +
+  stat_summary(fun = mean, geom = "point", shape = 18, show.legend = FALSE, colour = "red", size = 4) +
+  stat_summary(fun = mean, geom = "text", show.legend = FALSE, colour = "red", size = 4,
+               angle = 45, vjust = -0.25, hjust = -0.25,
+               aes(label = after_stat(round(y, 3)))) +
+  scale_x_discrete(guide = guide_axis(angle = 75)) +
+  scale_y_continuous(breaks = pretty_breaks(),
+                     expand = expansion(mult = c(NA, 0.2))) +
+  labs(x = "Trim sequence",
+       y = "Proportion of reads") +
+  theme_minimal()
+  
+```
+
+
+``` {r trim_proportion_table, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Display table
+kbl(count_trimmed, caption = "Count trimmed reads") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Export table
+my_path <- file.path(out_dir, "qc")
+write_excel_function(named_list = list("count_trimmed" = count_trimmed),
+                     path = file.path(my_path, "qc.xlsx"),
+                     overwrite_sheet = TRUE)
+
+```
+
+
+## Trim length
+
+``` {r trim_length, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Trim pattern lengths
+trim_pattern_length <- data.frame(trim_pattern_sequence = combined_trim_sequences) %>%
+  tibble::rownames_to_column("trim_pattern_name") %>%
+  dplyr::mutate(trim_pattern_length = nchar(trim_pattern_sequence))
+
+# Number of bases trimmed
+trim_length <- trim_locations %>%
+  dplyr::filter(trim_length > 0) %>%
+  group_by(file_stem, trim_pattern_name) %>%
+  dplyr::summarise(mean_trim_length = mean(trim_length, na.rm = TRUE)) %>%
+  ungroup() %>%
+  left_join(trim_pattern_length, by = join_by(trim_pattern_name)) %>%
+  relocate(c(trim_pattern_sequence, trim_pattern_length), .after = "trim_pattern_name")
+
+# Calculate mean bases trimmed for each trim pattern
+trim_length_overall <- trim_locations %>%
+  dplyr::filter(trim_length > 0) %>%
+  group_by(trim_pattern_name) %>%
+  dplyr::summarise(mean_trim_length = mean(trim_length, na.rm = TRUE)) %>%
+  ungroup() %>%
+  arrange(desc(mean_trim_length))
+
+# Reorder trim_pattern_name by overall mean trim length
+trim_length <- trim_length %>%
+  dplyr::mutate(trim_pattern_name = factor(trim_pattern_name, levels = trim_length_overall$trim_pattern_name))
+
+```
+
+
+``` {r trim_length_plot, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Plot
+ggplot(trim_length, aes(x = trim_pattern_name, y = mean_trim_length)) +
+  geom_boxplot(outliers = FALSE) +
+  geom_jitter(height = 0, width = 0.1, alpha = 0.5, size = 3) +
+  stat_summary(fun = mean, geom = "point", shape = 18, show.legend = FALSE, colour = "red", size = 4) +
+  stat_summary(fun = mean, geom = "text", show.legend = FALSE, colour = "red", size = 4,
+               angle = 45, vjust = -0.25, hjust = -0.25,
+               aes(label = after_stat(round(y, 2)))) +
+  geom_point(aes(y = trim_pattern_length),
+             colour = "blue", shape = 3) +
+  scale_x_discrete(guide = guide_axis(angle = 75)) +
+  scale_y_continuous(breaks = pretty_breaks(),
+                     expand = expansion(mult = c(NA, 0.2))) +
+  labs(x = "Trim sequence",
+       y = "Mean trim length (bp)") +
+  theme_minimal()
+  
+# Display table
+kbl(trim_length, caption = "Mean trim length") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Export table
+my_path <- file.path(out_dir, "qc")
+write_excel_function(named_list = list("trim_length" = trim_length),
+                     path = file.path(my_path, "qc.xlsx"),
+                     overwrite_sheet = TRUE)
+
+```
+
+
+# Align
+
+Map reads to reference sequences.
+
+``` {r align_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+minimap2_align <- function(dna_stringset, 
+                           ref_path, 
+                           out_dir, 
+                           minimap2_preset = "map-ont",
+                           minimap2_kmer = 15,
+                           minimap2_ms = 2,
+                           minimap2_mcs = 40,
+                           minimap2_secondary = "yes") {
+  
+  # Exit if DNA stringset is empty
+  if (length(dna_stringset) == 0) {
+    return(NULL)
+  }
+  
+  # Define file paths
+  fastq_path <- file.path(out_dir, "temp", "temp.fastq")
+  fasta_path <- file.path(out_dir, "temp", "temp.fasta")
+  sam_path <- file.path(out_dir, "temp", "temp.sam")
+  bam_path <- file.path(out_dir, "temp", "temp.bam")
+  temp_ref_path <- file.path(out_dir, "temp", "temp_ref.fasta")
+  
+  # Remove temporary files if they exist
+  file.remove(fastq_path, fasta_path, sam_path, bam_path, paste0(bam_path, ".bai"), temp_ref_path)
+  
+  # If DNA stringset has quality score export a temporary fastq, otherwise a fasta
+  if (is(dna_stringset, "QualityScaledXStringSet")) {
+    writeQualityScaledXStringSet(dna_stringset, filepath = fastq_path)
+    query_path <- fastq_path
+  } else {
+    writeXStringSet(dna_stringset, filepath = fasta_path)
+    query_path <- fasta_path
+  }
+  
+  # Import reference sequence/s
+  ref_sequences <- readDNAStringSet(ref_path, format = "fasta")
+  
+  # Function to run minimap
+  run_minimap2 <- function(minimap2_preset, minimap2_kmer, minimap2_ms, 
+                           minimap2_mcs, minimap2_secondary, reference_path, 
+                           query_path, sam_path, bam_path) {
+    # minimap2_command <- c("-ax", minimap2_preset, "--MD", "--cs", reference_path, query_path)
+    minimap2_command <- c("-ax", minimap2_preset, "--MD", "--cs",
+                          "-k", minimap2_kmer,
+                          "-A", minimap2_ms,
+                          "-m", minimap2_mcs,
+                          paste0("--secondary=", minimap2_secondary),
+                          reference_path, query_path)
+    system2("minimap2", args = minimap2_command, stdout = sam_path, stderr = NULL)
+    system(paste("samtools sort", sam_path, ">", bam_path))
+    system(paste("samtools index", bam_path))
+  }
+  
+  # Vector of ref names
+  ref_names <- setNames(names(ref_sequences), names(ref_sequences))
+  
+  # Run minimap with each reference sequence
+  alignment_info <- lapply(ref_names, function(ref_name,
+                                               ref_sequences,
+                                               temp_ref_path,
+                                               minimap2_preset,
+                                               minimap2_kmer,
+                                               minimap2_ms,
+                                               minimap2_mcs,
+                                               minimap2_secondary,
+                                               query_path,
+                                               sam_path,
+                                               bam_path) {
+    
+    # Export temporary reference file
+    ref_sequence <- ref_sequences[ref_name]
+    writeXStringSet(ref_sequence, temp_ref_path)
+    
+    # Align
+    run_minimap2(minimap2_preset = minimap2_preset,
+                 minimap2_kmer = minimap2_kmer, 
+                 minimap2_ms = minimap2_ms, 
+                 minimap2_mcs = minimap2_mcs, 
+                 minimap2_secondary = minimap2_secondary,
+                 reference_path = temp_ref_path,
+                 query_path = query_path,
+                 sam_path = sam_path,
+                 bam_path = bam_path)
+    
+    # Import bam
+    param <- ScanBamParam(what = scanBamWhat(),
+                          tag = c("NM", "MD"))
+    bam_data <- scanBam(bam_path, param = param)
+    alignments <- bam_data[[1]]
+    
+    # Function to expand the 'tag' field to match the length of other elements
+    expand_tags <- function(tags, length_out) {
+      if (is.null(tags)) {
+        return(rep(NA, length_out))
+      }
+      lapply(tags, function(tag_value) {
+        if (length(tag_value) < length_out) {
+          c(tag_value, rep(NA, length_out - length(tag_value)))
+        } else {
+          tag_value
+        }
+      })
+    }
+    
+    # Expand the tag element to match the length of other elements
+    alignments$tag <- expand_tags(alignments$tag, length(alignments$qname))
+    
+    # Ensure NM tag exists
+    if (is.null(alignments$tag$NM)) {
+      alignments$tag$NM <- rep(NA, length(alignments$qname))
+    }
+    
+    # Alignment data frame
+    alignment_info <- as.data.frame(alignments) %>%
+      dplyr::rename(ref_start = pos,
+                    mismatches = tag.NM)
+    
+    # Remove temporary reference file
+    file.remove(temp_ref_path)
+    
+    # Output
+    return(alignment_info)
+    
+  },
+  ref_sequences = ref_sequences,
+  temp_ref_path = temp_ref_path,
+  query_path = query_path,
+  sam_path = sam_path,
+  bam_path = bam_path,
+  minimap2_preset = minimap2_preset,
+  minimap2_kmer = minimap2_kmer,
+  minimap2_ms = minimap2_ms,
+  minimap2_mcs = minimap2_mcs,
+  minimap2_secondary = minimap2_secondary)
+  
+  # Rbind and sort by the input sequence order
+  alignment_info <- rbindlist(alignment_info)
+    # arrange(factor(qname, levels = names(dna_stringset)), rname)
+  
+  # Add input query sequence to alignment info
+  query_sequences <- data.frame(qname = names(dna_stringset),
+                                query_sequence = unname(as.character(dna_stringset)))
+  # query_sequences <- data.frame("query_sequence" = as.character(dna_stringset)) %>%
+  #   tibble::rownames_to_column("qname")
+  alignment_info <- alignment_info %>%
+    left_join(query_sequences, by = join_by(qname)) %>%
+    dplyr::rename(aligned_subsequence = seq)
+  
+  
+  # Function to calculate the alignment end position on the reference sequence
+  calculate_ref_positions <- function(ref_start, cigar, strand) {
+    
+    # Exit if NA
+    if (is.na(ref_start) || is.na(cigar) || is.na(strand)) {
+      return(c("ref_start" = NA, 
+               "ref_end" = NA, 
+               "alignment_length_on_ref" = NA))
+    }
+    
+    # Extract cigar elements
+    cigar_elements <- cigarToRleList(cigar)
+    
+    # Calculate the alignment length on the reference by summing the lengths of CIGAR operations 
+    # that affect the reference sequence (e.g., matches (M), deletions (D), skips(N), exact matches (=) 
+    # and mismatches (X), ignoring insertions.
+    alignment_length_on_ref <- sum(runLength(cigar_elements[[1]])[runValue(cigar_elements[[1]]) %in% c("M", "D", "N", "=", "X")])
+    
+    # Calculate end position on the reference (subtract 1 because positions are 1-based)
+    ref_end <- ref_start + alignment_length_on_ref - 1
+    
+    # Adjust reference coordinates based on strand
+    if (strand == "-") {
+        adjusted_ref_start <- ref_end
+        adjusted_ref_end <- ref_start
+    } else {
+        adjusted_ref_start <- ref_start
+        adjusted_ref_end <- ref_end
+    }
+    
+    # Output
+    return(c("ref_start" = adjusted_ref_start, 
+             "ref_end" = adjusted_ref_end,
+             "alignment_length_on_ref" = alignment_length_on_ref))
+  }
+  
+  # Calculate the alignment end positions on the reference sequence
+  ref_positions <- mapply(calculate_ref_positions, 
+                          ref_start = alignment_info$ref_start, 
+                          cigar = alignment_info$cigar,
+                          strand = alignment_info$strand,
+                          SIMPLIFY = FALSE)
+  
+  # Convert the list of named vectors into a dataframe
+  ref_positions <- as.data.frame(do.call(rbind, ref_positions))
+  rownames(ref_positions) <- NULL
+  
+  # Add reference positions
+  alignment_info <- cbind(alignment_info %>%
+                            dplyr::select(-ref_start),
+                          ref_positions)
+  
+  # Function to calculate alignment positions on the query sequence
+  calculate_query_positions <- function(query_sequence, aligned_subsequence, cigar, strand) {
+    
+    # Exit if inputs are NA
+    if (is.na(query_sequence) || is.na(aligned_subsequence) || is.na(cigar) || is.na(strand)) {
+      return(c("query_start" = NA, 
+               "query_end" = NA, 
+               "alignment_length_on_query" = NA))
+    }
+    
+    # Convert sequences to characters
+    query_sequence <- as.character(query_sequence)
+    aligned_subsequence <- as.character(aligned_subsequence)
+    
+    # Reverse complement the aligned subsequence if necessary
+    if (strand == "-") {
+      aligned_subsequence_corrected <- as.character(reverseComplement(DNAString(aligned_subsequence)))
+    } else {
+      aligned_subsequence_corrected <- aligned_subsequence
+    }
+    
+    # Locate the aligned subsequence in the full query sequence
+    query_location <- str_locate(query_sequence, aligned_subsequence_corrected)
+    
+    # Exit if  aligned subsequence is not found in the query sequence
+    if (is.na(query_location[1])) {
+      return(c("query_start" = NA, "query_end" = NA))
+    }
+    
+    # Exit if cigar is NA
+    if (is.na(cigar)) {
+      return(c("query_start" = NA, "query_end" = NA))
+    }
+    
+    # Extract cigar elements
+    cigar_elements <- cigarToRleList(cigar)
+    
+    # Start position on the read sequence
+    cigar_clip <- runValue(cigar_elements[[1]])[1]
+    
+    # Start position on query sequence
+    if (cigar_clip == "S") {
+      # If the cigar string starts with soft-clipping ('S'), the alignment begins after the soft-clipped bases
+      query_start <- runLength(cigar_elements[[1]])[1] + 1
+    } else{
+      # If no soft-clipping, start at the beginning
+      query_start <- 1
+    }
+    
+    # Calculate the alignment length on the read (sum of matches (M), insertions (I), exact matches (=)
+    # and mismatches (X) affecting the read). Deletions ('D') and skipped regions ('N') are excluded 
+    # because they affect only the reference.
+    # Soft-clipped bases (S) are excluded because they are not part of the aligned region
+    alignment_length_on_query <- sum(runLength(cigar_elements[[1]])[runValue(cigar_elements[[1]]) %in% c("M", "I", "=", "X")])
+    
+    # End position on the full read
+    query_end <- query_start + alignment_length_on_query - 1
+    
+    # Calculate the adjusted query coordinates based on strand
+    if (strand == "-") {
+      adjusted_query_start <- query_location[2] - query_end + 1
+      adjusted_query_end <- query_location[2] - query_start + 1
+    } else {
+      adjusted_query_start <- query_location[1] + query_start - 1
+      adjusted_query_end <- query_location[1] + query_end - 1
+    }
+    
+    # Output
+    return(c("query_start" = adjusted_query_start, 
+             "query_end" = adjusted_query_end,
+             "alignment_length_on_query" = alignment_length_on_query))
+    
+  }
+  
+  # Calculate the alignment end positions on the reference sequence
+  query_positions <- mapply(calculate_query_positions, 
+                            query_sequence = setNames(alignment_info$query_sequence, alignment_info$qname),
+                            aligned_subsequence = alignment_info$aligned_subsequence,
+                            cigar = alignment_info$cigar,
+                            strand = alignment_info$strand,
+                            SIMPLIFY = FALSE)
+  
+  # Convert the list of named vectors into a dataframe
+  query_positions <- as.data.frame(do.call(rbind, query_positions))
+  rownames(query_positions) <- NULL
+  
+  # Add reference positions
+  alignment_info <- cbind(alignment_info, query_positions)
+  
+  # Function to count insertions and deletions
+  calculate_indel_counts <- function(cigar) {
+    if (is.na(cigar)) {
+      return(c("insertions" = NA, "deletions" = NA))
+    }
+    cigar_elements <- cigarToRleList(cigar)
+    insertions <- sum(runLength(cigar_elements[[1]])[runValue(cigar_elements[[1]]) == "I"])
+    deletions <- sum(runLength(cigar_elements[[1]])[runValue(cigar_elements[[1]]) == "D"])
+    return(c("insertions" = insertions, "deletions" = deletions))
+  }
+  
+  # Calculate insertions and deletions
+  indel_counts <- t(sapply(alignment_info$cigar, calculate_indel_counts))
+  alignment_info$insertions <- indel_counts[, 1]
+  alignment_info$deletions <- indel_counts[, 2]
+  
+  # Reorder columns
+  alignment_info <- alignment_info %>%
+    relocate(c("ref_start", "ref_end", "alignment_length_on_ref", 
+               "query_start", "query_end", "alignment_length_on_query", 
+               "query_sequence", "aligned_subsequence"), 
+             .after = "strand") %>%
+    relocate(c("mismatches", "insertions", "deletions"), .after = "mapq")
+  
+  # Remove temporary files
+  file.remove(fastq_path, fasta_path, sam_path, bam_path, paste0(bam_path, ".bai"))
+  
+  # Output
+  return(alignment_info)
+  
+}
+
+```
+
+
+``` {r align, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Run alignment function
+my_path <- file.path(out_dir, "temp", "alignments.RData")
+if (file.exists(my_path)) {
+  load(my_path)
+} else {
+  alignments <- pblapply(trimmed_sequencing_files, minimap2_align,
+                         ref_path = ref_path,
+                         out_dir = out_dir,
+                         minimap2_preset = minimap2_preset,
+                         minimap2_ms = minimap2_ms,
+                         minimap2_mcs = minimap2_mcs,
+                         minimap2_secondary = minimap2_secondary)
+  save(alignments, file = my_path)
+}
+
+# Add file stem
+alignments <- lapply(file_stem_vector, function(my_file_stem,
+                                                alignments) {
+  alignment_info <- alignments[[my_file_stem]]
+  if (!is.null(alignment_info)) {
+    alignment_info <- alignment_info %>%
+      dplyr::mutate(file_stem = my_file_stem) %>%
+      relocate(file_stem)  
+  }
+  return(alignment_info)
+},
+alignments = alignments)
+
+# Merge alignment table
+merged_alignment_info <- rbindlist(alignments)
+
+```
+
+
+## Alignment count per read
+
+``` {r alignment_count, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Calculate total reads per file_stem
+total_reads <- merged_alignment_info %>%
+  distinct(file_stem, qname) %>%
+  group_by(file_stem) %>%
+  dplyr::summarise(total_reads = n()) %>%
+  ungroup()
+
+# Count alignments per read
+alignments_per_read <- merged_alignment_info %>%
+  dplyr::filter(!is.na(rname)) %>%
+  group_by(file_stem, qname, rname) %>%
+  dplyr::summarise(n_alignments = n()) %>%
+  ungroup() %>%
+  dplyr::mutate(n_alignments = ifelse(is.na(rname), 1, n_alignments))
+
+# Count reads without any alignments
+no_alignment_reads <- merged_alignment_info %>%
+  distinct(file_stem, qname, rname) %>%
+  dplyr::filter(!qname %in% alignments_per_read$qname)
+
+# Add no alignment reads
+alignments_per_read <- rbind.fill(alignments_per_read, no_alignment_reads)
+  
+
+# Count number of reads with each number of alignment
+alignments_per_read_summary <- alignments_per_read %>%
+  group_by(file_stem, rname, n_alignments) %>%
+  dplyr::summarise(read_count = n()) %>%
+  ungroup() %>%
+  left_join(total_reads, by = join_by(file_stem)) %>%
+  dplyr::mutate(proportion = read_count / total_reads)
+
+```
+
+
+``` {r plot_alignment_count, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE, fig.height=8, fig.width=10}
+
+ggplot(alignments_per_read_summary, aes(x = file_stem, y = proportion)) +
+  facet_grid(rows = vars(rname),
+             labeller = as_labeller(function(x) {
+               ifelse(is.na(x), "Unaligned", x)
+             })) +
+  geom_bar(aes(fill = as.factor(n_alignments)),
+           stat = "identity", position = "stack", colour = "black") +
+  geom_text(aes(label = round(..y.., 3)),
+            angle = 70, vjust = -0.25, hjust = -0.25, size = 2) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                 guide = guide_axis(angle = 70)) +
+  scale_y_continuous(breaks = pretty_breaks(),
+                     expand = expansion(mult = c(NA, 0.3))) +
+  labs(x = "File stem",
+       y = "Proportion of reads",
+       fill = "Number\nof alignments\nper read") +
+  theme_bw()
+
+```
+
+
+## Filter alignments
+
+``` {r filter_alignments, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Import reference sequences
+ref_stringset <- readDNAStringSet(ref_path)
+ref_names <- names(ref_stringset)
+
+# Filter for reads that align to all reference sequences
+reads_to_keep <- merged_alignment_info %>%
+  dplyr::filter(!is.na(rname)) %>%
+  group_by(file_stem, qname) %>%
+  dplyr::summarise(all_refs_aligned = all(ref_names %in% rname)) %>%
+  ungroup() %>%
+  dplyr::filter(all_refs_aligned) %>%
+  # pull(qname)
+  distinct(file_stem, qname, all_refs_aligned)
+filtered_alignment_info <- merged_alignment_info %>%
+  left_join(reads_to_keep, by = join_by(file_stem, qname)) %>%
+  dplyr::filter(all_refs_aligned,
+                !is.na(rname)) %>%
+  dplyr::select(-all_refs_aligned)
+  # dplyr::filter(qname %in% reads_to_keep)
+
+# Sort and keep the best alignment for each reference sequence
+filtered_alignment_info <- filtered_alignment_info %>%
+  group_by(qname, rname) %>%
+  dplyr::arrange(desc(mapq), desc(alignment_length_on_ref)) %>%
+  dplyr::slice(1) %>%
+  ungroup()
+
+# Ensure alignments are on the same strand
+filtered_alignment_info <- filtered_alignment_info %>%
+  group_by(qname) %>%
+  dplyr::filter(strand[1] == strand[2]) %>%
+  ungroup()
+
+```
+
+
+``` {r summarise_alignment_filter, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Total reads before filtering
+read_count_before <- merged_alignment_info %>%
+  group_by(file_stem) %>%
+  dplyr::summarise(before = n_distinct(qname)) %>%
+  ungroup()
+  # dplyr::mutate(condition = "Before")
+
+# Total reads after filtering
+read_count_after <- filtered_alignment_info %>%
+  group_by(file_stem) %>%
+  dplyr::summarise(after = n_distinct(qname)) %>%
+  ungroup()
+  # dplyr::mutate(condition = "After")
+
+# Combine read count data
+alignment_filter_read_count <- read_count_before %>%
+  left_join(read_count_after, by = join_by(file_stem))
+
+# Long format
+alignment_filter_read_count_long <- alignment_filter_read_count %>%
+  pivot_longer(!file_stem, names_to = "condition", values_to = "read_count") %>%
+  dplyr::mutate(condition = fct_relevel(condition, c("before", "after")))
+
+```
+
+
+``` {r plot_alignment_filter_summary, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+ggplot(alignment_filter_read_count_long, aes(x = condition, y = read_count)) +
+  geom_boxplot(outliers = FALSE) +
+  geom_point(alpha = 0.5, size = 3) +
+  geom_line(aes(group = file_stem)) +
+  stat_summary(fun = mean, geom = "point", shape = 18, 
+               show.legend = FALSE, colour = "red", size = 4) +
+  stat_summary(fun = mean, geom = "text", show.legend = FALSE, colour = "red", size = 3,
+               angle = 45, vjust = -0.25, hjust = -0.25,
+               aes(label = after_stat(round(y, 2)))) +
+  scale_x_discrete(guide = guide_axis(angle = 75),
+                   labels = c("before" = "Before", "after" = "After")) +
+  # scale_y_continuous(breaks = pretty_breaks()) +
+  scale_y_continuous(trans = "log10",
+                     expand = expansion(mult = c(0.2, 0.2))) +
+  labs(title = "Read counts after filtering alignments",
+       x = "Filtering condition",
+       y = "Read count") +
+  theme_minimal()
+
+```
+
+
+``` {r plot_alignment_filter, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE, fig.height=8, fig.width=10}
+
+ggplot(alignment_filter_read_count_long, aes(x = file_stem, y = read_count)) +
+  facet_grid(rows = vars(condition),
+             labeller = labeller(condition = c("before" = "Before", "after" = "After"))) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = read_count),
+            angle = 70, vjust = -0.25, hjust = -0.25, size = 2) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                   guide = guide_axis(angle = 70)) +
+  scale_y_continuous(breaks = pretty_breaks(),
+                     expand = expansion(mult = c(NA, 0.3))) +
+  labs(title = "Read counts after filtering alignments",
+       x = "File stem",
+       y = "Read count") +
+  theme_bw()
+
+```
+
+
+``` {r alignment_filter_table, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Display table
+kbl(alignment_filter_read_count, caption = "Alignment filter read counts") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Export table
+my_path <- file.path(out_dir, "qc")
+write_excel_function(named_list = list("alignment_filter_read_count" = alignment_filter_read_count),
+                     path = file.path(my_path, "qc.xlsx"),
+                     overwrite_sheet = TRUE)
+
+```
+
+
+## Alignment strand
+
+``` {r alignment_strand, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Calculate total alignments per file_stem
+total_alignments_per_file <- filtered_alignment_info %>%
+  group_by(file_stem, rname) %>%
+  summarise(total_alignments = n()) %>%
+  ungroup()
+
+# Summarise strand orientation and calculate proportions
+alignment_strand_summary <- filtered_alignment_info %>%
+  group_by(file_stem, rname, strand) %>%
+  dplyr::summarise(read_count = n()) %>%
+  ungroup() %>%
+  left_join(total_alignments_per_file, by = join_by(file_stem, rname)) %>%
+  dplyr::mutate(proportion = read_count / total_alignments)
+
+```
+
+
+``` {r plot_alignment_strand, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+ggplot(alignment_strand_summary, aes(x = rname, y = proportion)) +
+  geom_jitter(aes(colour = strand),
+              height = 0, width = 0.1, alpha = 0.75, size = 3) +
+  stat_summary(fun = mean, geom = "point", 
+               aes(fill = strand),
+               shape = 23,show.legend = FALSE, colour = "black", 
+               size = 4, alpha = 0.75) +
+  stat_summary(fun = mean, geom = "text", 
+               aes(label = round(..y.., 3), 
+                   group = interaction(rname, strand),
+                   colour = as.factor(strand)),
+               position = position_nudge(x = 0.2), 
+               size = 3, show.legend = FALSE) +
+  scale_x_discrete(guide = guide_axis(angle = 75)) +
+  scale_y_continuous(breaks = pretty_breaks()) +
+  labs(title = "Strand of alignments",
+       x = "Reference sequence",
+       y = "Proportion of reads",
+       color = "Strand") +
+  theme_minimal()
+
+```
+
+
+## Alignment length
+
+``` {r alignment_length, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Reference sequence lengths
+ref_lengths <- data.frame(rname = names(ref_stringset),
+                          ref_length = width(ref_stringset))
+
+# Summarise alignment length
+alignment_length_summary <- filtered_alignment_info %>%
+  dplyr::filter(!is.na(alignment_length_on_ref)) %>%
+  group_by(file_stem, rname) %>%
+  dplyr::summarise(alignment_length_on_ref = mean(alignment_length_on_ref, na.rm = TRUE)) %>%
+  ungroup()
+
+```
+
+
+``` {r plot_alignment_length, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+ggplot(alignment_length_summary, aes(x = rname, y = alignment_length_on_ref)) +
+  facet_wrap(vars(rname), scales = "free_x") +
+  geom_boxplot(outliers = FALSE) +
+  geom_jitter(height = 0, width = 0.1, alpha = 0.5, size = 3) +
+  stat_summary(fun = mean, geom = "point", shape = 18, 
+               show.legend = FALSE, colour = "red", size = 4) +
+  stat_summary(fun = mean, geom = "text", show.legend = FALSE, colour = "red", size = 3,
+               angle = 45, vjust = -0.25, hjust = -0.25,
+               aes(label = after_stat(round(y, 2)))) +
+  geom_hline(data = ref_lengths,
+             aes(x = rname, yintercept = ref_length),
+             linetype = "dashed", colour = "red") +
+  scale_x_discrete(guide = guide_axis(angle = 75)) +
+  scale_y_continuous(breaks = pretty_breaks()) +
+  labs(title = "Alignment length on reference sequence",
+       x = "Reference sequence",
+       y = "Alignment length") +
+  theme_minimal()
+
+```
+
+
+## Mapping quality
+
+``` {r mapping_quality, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Summarise mapping length
+mapping_quality_summary <- filtered_alignment_info %>%
+  dplyr::filter(!is.na(mapq)) %>%
+  group_by(file_stem, rname) %>%
+  dplyr::summarise(mapq = mean(mapq, na.rm = TRUE)) %>%
+  ungroup()
+
+```
+
+
+``` {r plot_mapping_quality, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+ggplot(mapping_quality_summary, aes(x = rname, y = mapq)) +
+  geom_boxplot(outliers = FALSE) +
+  geom_jitter(height = 0, width = 0.1, alpha = 0.5, size = 3) +
+  stat_summary(fun = mean, geom = "point", shape = 18, 
+               show.legend = FALSE, colour = "red", size = 4) +
+  stat_summary(fun = mean, geom = "text", show.legend = FALSE, colour = "red", size = 3,
+               angle = 45, vjust = -0.25, hjust = -0.25,
+               aes(label = after_stat(round(y, 2)))) +
+  scale_x_discrete(guide = guide_axis(angle = 75)) +
+  scale_y_continuous(breaks = pretty_breaks(),
+                     expand = expansion(mult = c(0.2, 0.2))) +
+  labs(title = "Mapping quality",
+       x = "Reference sequence",
+       y = "Mapping quality") +
+  theme_minimal()
+
+```
+
+
+## Mismatches, deletions and insertions
+
+``` {r mismatch_deletion_indel, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Reshape to long format
+mismatch_deletion_indel_data <- filtered_alignment_info %>%
+  dplyr::select(file_stem, rname, mismatches, insertions, deletions) %>%
+  pivot_longer(cols = c(mismatches, insertions, deletions),
+               names_to = "metric",
+               values_to = "count")
+
+# Summarise the counts for each metric
+mismatch_deletion_indel_summary <- mismatch_deletion_indel_data %>%
+  dplyr::filter(!is.na(rname)) %>%
+  group_by(file_stem, rname, metric) %>%
+  dplyr::summarise(mean_count = mean(count, na.rm = TRUE)) %>%
+  ungroup()
+
+```
+
+
+``` {r plot_mismatch_deletion_indel, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+ggplot(mismatch_deletion_indel_summary, aes(x = rname, y = mean_count)) +
+  geom_jitter(aes(colour = metric),
+              height = 0, width = 0.1, alpha = 0.75, size = 3) +
+  stat_summary(fun = mean, geom = "point", 
+               aes(fill = metric),
+               shape = 23,show.legend = FALSE, colour = "black", 
+               size = 4, alpha = 0.75) +
+  stat_summary(fun = mean, geom = "text", 
+               aes(label = round(..y.., 3), 
+                   group = interaction(rname, metric),
+                   colour = as.factor(metric)),
+               position = position_nudge(x = 0.2), 
+               size = 3, vjust = -0.5, show.legend = FALSE) +
+  scale_x_discrete(guide = guide_axis(angle = 75)) +
+  scale_y_continuous(breaks = pretty_breaks()) +
+  labs(title = "Mismatches, deletions and indels",
+       x = "Reference sequence",
+       y = "Mean count",
+       color = "Metric") +
+  theme_minimal()
+
+```
+
+
+``` {r list_alignments, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Split alignments into a list by sequencing file
+list_alignment_info <- filtered_alignment_info %>%
+  split(f = as.factor(.$file_stem))
+
+```
+
+
+## Visualise alignments
+
+``` {r visualise_alignment_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to visualise alignments
+visualise_alignments <- function(alignment_info, alignment_colours = NULL) {
+  
+  # Sort sense alignments by query position
+  sense_alignments <- alignment_info %>%
+    dplyr::filter(strand == "+") %>%
+    group_by(file_stem, qname) %>%
+    arrange(query_start, query_end, .by_group = TRUE) %>%
+    dplyr::mutate(alignment_number = row_number()) %>%
+    ungroup()
+  
+  # Sort antisense alignments by reverse query position
+  antisense_alignments <- alignment_info %>%
+    dplyr::filter(strand == "-") %>%
+    group_by(file_stem, qname) %>%
+    arrange(desc(query_start), desc(query_end), .by_group = TRUE) %>%
+    dplyr::mutate(alignment_number = row_number()) %>%
+    ungroup()
+  
+  # Combine sense and reversed antisense alignments
+  combined_alignments <- rbind(sense_alignments, antisense_alignments)
+  
+  # Find the order of reference sequences
+  ref_order <- combined_alignments %>%
+    group_by(alignment_number, rname) %>%
+    dplyr::summarise(count = n()) %>%
+    ungroup() %>%
+    arrange(alignment_number, desc(count))
+  
+  # Find the commonest reference sequence order
+  commonest_ref_order <- ref_order %>%
+    group_by(alignment_number) %>%
+    slice_max(order_by = count, n = 1) %>%
+    ungroup() %>%
+    arrange(alignment_number) %>%
+    pull(rname)
+  commonest_ref_order <- as.character(commonest_ref_order)
+  
+  # Set levels
+  alignment_info <- alignment_info %>%
+    dplyr::filter(!is.na(rname)) %>%
+    dplyr::mutate(rname = fct_relevel(rname, commonest_ref_order))
+  
+  # Plot
+  my_plot <-
+    ggplot(alignment_info, aes(x = ref_start, xend = ref_end, y = qname)) +
+    facet_grid(cols = vars(rname),
+               scales = "free",
+               space = "free") +
+    geom_segment(aes(colour = strand), size = 1.4, alpha = 0.7, colour = "black") +
+    geom_segment(aes(colour = strand), size = 1, alpha = 0.7) +
+    scale_x_continuous(breaks = pretty_breaks(n = 6),
+                       guide = guide_axis(angle = 45)) +
+    { if (!is.null(alignment_colours)) {
+      scale_colour_manual(values = alignment_colours)
+    }} +
+    labs(x = "Reference sequence position (bp)",
+         y = "",
+         colour = "Strand") +
+    theme_minimal() +
+    theme(axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          strip.text = element_text(angle = 70),
+          strip.text.x = element_text(hjust = 0.5, margin = margin(t = 5, b = 5)))
+  
+  # Output
+  return(my_plot)
+  
+}
+
+```
+
+
+``` {r visualise_alignments, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Plot
+my_plots <- lapply(list_alignment_info, visualise_alignments,
+                   alignment_colours = c("+" = "#619CFF",
+                                         "-" = "#F8766D",
+                                         "+c" = "#00BA38"))
+
+# Display plots
+for (plot_name in names(my_plots)) {
+  my_plot <- my_plots[[plot_name]]
+  if(!is.null(my_plot)) {
+    my_plot <- my_plot + labs(title = plot_name)
+    print(my_plot)
+  }
+}
+
+```
+
+
+# Correct strands
+
+Adjust sequence orientations to sense alignment.
+
+``` {r correct_strand_functions, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to reverse complement
+reverse_complement <- function(sequence) {
+  as.character(reverseComplement(DNAString(sequence)))
+}
+
+# Function to correct alignment strand
+correct_strand <- function(alignment_info) {
+  alignment_info %>%
+    rowwise() %>%
+    dplyr::mutate(query_sequence = ifelse(strand == "-", reverse_complement(query_sequence), query_sequence),
+                  aligned_subsequence = ifelse(strand == "-", reverse_complement(aligned_subsequence), aligned_subsequence),
+                  query_length = nchar(query_sequence),
+                  temp_ref_start = ifelse(strand == "-", ref_end, ref_start),
+                  temp_ref_end = ifelse(strand == "-", ref_start, ref_end),
+                  temp_query_start = ifelse(strand == "-", query_length - query_end + 1, query_start),
+                  temp_query_end = ifelse(strand == "-", query_length - query_start + 1, query_end),
+                  strand = ifelse(as.character(strand) == "-", "+c", as.character(strand))) %>%
+    relocate(query_length, .after = "query_sequence") %>%
+    dplyr::mutate(ref_start = temp_ref_start,
+                  ref_end = temp_ref_end,
+                  query_start = temp_query_start,
+                  query_end = temp_query_end) %>%
+    dplyr::select(-starts_with("temp_")) %>%
+    ungroup()
+}
+
+```
+
+
+``` {r correct_strand, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+corrected_alignment_info <- pblapply(list_alignment_info, correct_strand)
+
+```
+
+
+# Reference sequence order
+
+## Find reference order
+
+Determine the order of reference sequences most commonly matched in alignments. Understanding this order helps identify the typical alignment pattern across reads.
+
+``` {r find_ref_order, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Merge alignment info
+consistent_alignment_info <- rbindlist(corrected_alignment_info)
+
+# Find order of reference sequences from sense alignments
+ref_order <- consistent_alignment_info %>%
+  dplyr::filter(!is.na(rname)) %>%
+  group_by(file_stem, qname) %>%
+  arrange(query_start, query_end, .by_group = TRUE) %>%
+  dplyr::mutate(alignment_number = row_number()) %>%
+  ungroup() %>%
+  group_by(file_stem, alignment_number, rname) %>%
+  dplyr::summarise(count = n()) %>%
+  ungroup() %>%
+  arrange(file_stem, alignment_number, desc(count)) %>%
+  group_by(file_stem, alignment_number) %>%
+  dplyr::mutate(proportion = count / sum(count)) %>%
+  ungroup()
+
+```
+
+
+``` {r plot_ref_order, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+ggplot(ref_order, aes(x = factor(alignment_number), y = proportion)) +
+  geom_jitter(aes(colour = rname),
+              height = 0, width = 0.1, alpha = 0.75, size = 3) +
+  stat_summary(fun = mean, geom = "point", 
+               aes(fill = rname),
+               shape = 23,show.legend = FALSE, colour = "black", 
+               size = 4, alpha = 0.75) +
+  stat_summary(fun = mean, geom = "text", 
+               aes(label = round(..y.., 3), 
+                   group = interaction(rname, rname),
+                   colour = as.factor(rname)),
+               position = position_nudge(x = 0.2), 
+               size = 3, vjust = -0.5, show.legend = FALSE) +
+  scale_y_continuous(breaks = pretty_breaks()) +
+  labs(title = "Reference order",
+       x = "Reference sequence order",
+       y = "Proportion of reads",
+       color = "Reference sequence") +
+  theme_minimal()
+
+```
+
+
+## Filter reads matching the commonest reference order
+
+Filters reads to include only those that match the most frequently observed reference sequence order.
+
+``` {r filter_consistent_ref_order, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Commonest reference sequence order
+commonest_ref_order <- ref_order %>%
+  group_by(file_stem, alignment_number) %>%
+  slice_max(order_by = count, n = 1) %>%
+  ungroup() %>%
+  arrange(file_stem, alignment_number) %>%
+  dplyr::select(file_stem, alignment_number, rname) %>%
+  dplyr::rename(rname_commonest = rname)
+
+# Display table
+kbl(commonest_ref_order, caption = "Commonest reference order") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Filter
+consistent_alignment_info <- consistent_alignment_info %>%
+  group_by(file_stem, qname) %>%
+  arrange(query_start, query_end, .by_group = TRUE) %>%
+  dplyr::mutate(alignment_number = row_number()) %>%
+  ungroup() %>%
+  relocate(alignment_number, .after = "qname") %>%
+  left_join(commonest_ref_order,
+            by = join_by(file_stem, alignment_number)) %>%
+  dplyr::filter(rname == rname_commonest) %>%
+  dplyr::select(-rname_commonest)
+
+# Split alignments into a list by sequencing file
+consistent_alignment_info <- consistent_alignment_info %>%
+  split(f = as.factor(.$file_stem))
+
+```
+
+
+``` {r readcount_reforder_filter, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Count reads before filtering for a consistent reference order
+read_count_before <- rbindlist(corrected_alignment_info) %>%
+  distinct(file_stem, qname) %>%
+  group_by(file_stem) %>%
+  dplyr::summarise(before = n()) %>%
+  ungroup()
+
+# Count reads after filtering for a consistent reference order
+read_count_after <- rbindlist(consistent_alignment_info) %>%
+  distinct(file_stem, qname) %>%
+  group_by(file_stem) %>%
+  dplyr::summarise(after = n()) %>%
+  ungroup()
+
+# Join
+readcount_reforder_filter <- read_count_before %>%
+  left_join(read_count_after, by = join_by(file_stem))
+
+```
+
+
+``` {r plot_readcount_reforder_filter, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, fig.height=8, fig.width=10}
+
+# Long format
+readcount_reforder_filter_long <- readcount_reforder_filter %>%
+  pivot_longer(!file_stem, names_to = "dataset", values_to = "read_count") %>%
+  dplyr::mutate(dataset = fct_relevel(dataset, c("before", "after")))
+
+# Plot
+ggplot(readcount_reforder_filter_long, aes(x = file_stem, y = read_count)) +
+  facet_grid(rows = vars(dataset),
+             labeller = as_labeller(c("before" = "Before",
+                                      "after" = "After"))) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = read_count),
+            angle = 70, vjust = -0.25, hjust = -0.25, size = 3) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                   guide = guide_axis(angle = 70)) +
+  scale_y_continuous(breaks = pretty_breaks(),
+                     expand = expansion(mult = c(NA, 0.3))) +
+  labs(title = "Read count after filtering for consistent reference order",
+       x = "File stem",
+       y = "Read count") +
+  theme_bw()
+
+```
+
+``` {r table_readcount_reforder_filter, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Display table
+kbl(readcount_reforder_filter, caption = "Read count after filtering for consistent reference order") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Export table
+my_path <- file.path(out_dir, "qc")
+write_excel_function(named_list = list("readcount_reforder_filter" = readcount_reforder_filter),
+                     path = file.path(my_path, "qc.xlsx"),
+                     overwrite_sheet = TRUE)
+
+```
+
+
+## Visualise alignments with strand corrected
+
+``` {r visualise_corrected_alignments, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Plot
+my_plots <- lapply(consistent_alignment_info, visualise_alignments,
+                   alignment_colours = c("+" = "#619CFF",
+                                         "-" = "#F8766D",
+                                         "+c" = "#00BA38"))
+
+# Display plots
+for (plot_name in names(my_plots)) {
+  my_plot <- my_plots[[plot_name]]
+  if(!is.null(my_plot)) {
+    my_plot <- my_plot + labs(title = plot_name)
+    print(my_plot)
+  }
+}
+
+```
+
+
+# Manually remove reads
+
+Optional manual removal of reads that may be erroneous or of low quality.
+
+``` {r summarise_read_exclusions, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Optionally remove reads manually
+if (!is.na(manual_read_exclusion_path)) {
+
+  # Import manual read exclusions
+  manual_read_exclusion <- read_excel(manual_read_exclusion_path) %>%
+    distinct()
+
+  # Convert into a list
+  manual_read_exclusion_list <- manual_read_exclusion %>%
+    group_by(file_name) %>%
+    dplyr::summarise(reads = list(read_name)) %>%
+    ungroup() %>%
+    tibble::deframe()
+
+  # Summarise read exclusions
+  read_exclusion_summary <- lapply(file_stem_vector, function(file_stem,
+                                            file_details,
+                                            consistent_alignment_info,
+                                            manual_read_exclusion_list) {
+    
+    # Extract sequencing file, file name and reads to exclude
+    alignment_info <- consistent_alignment_info[[file_stem]]
+    file_name <- file_details$file_name[match(file_stem, file_details$file_stem)]
+    read_exclusions <- manual_read_exclusion_list[[file_name]]
+    
+    # Calculate total reads and excluded reads
+    total_reads <- length(alignment_info$qname)
+    excluded_reads <- sum(alignment_info$qname %in% read_exclusions)
+    
+    # Create a summary row
+    return(data.frame(file_stem = file_stem,
+                      total_reads = total_reads,
+                      excluded_reads = excluded_reads,
+                      proportion_excluded = excluded_reads / total_reads))
+    
+  },
+  file_details = file_details,
+  consistent_alignment_info = consistent_alignment_info,
+  manual_read_exclusion_list = manual_read_exclusion_list)
+    
+  # rbind
+  read_exclusion_summary <- rbindlist(read_exclusion_summary)
+
+  # Display table
+  kbl(read_exclusion_summary, caption = "Manual exclusion of reads") %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+  # Plot the total reads and excluded reads as a bar chart
+  ggplot(read_exclusion_summary, aes(x = "", y = proportion_excluded)) +
+    geom_boxplot(outliers = FALSE) +
+    geom_jitter(height = 0, width = 0.1, alpha = 0.5, size = 3) +
+    stat_summary(fun = mean, geom = "point", shape = 18, show.legend = FALSE,
+                 colour = "red", size = 4) +
+    stat_summary(fun = mean, geom = "text",
+                 aes(label = after_stat(round(y, 2))),
+                 show.legend = FALSE, colour = "red", size = 3,
+                 angle = 45, vjust = -0.25, hjust = -0.25) +
+    scale_x_discrete(guide = guide_axis(angle = 75)) +
+    scale_y_continuous(breaks = pretty_breaks(),
+                       expand = expansion(mult = c(NA, 0.1))) +
+    labs(title = "Proportion of reads excluded",
+         x = "Sequencing files",
+         y = "Proportion of reads excluded") +
+    theme_minimal()
+
+}
+
+```
+
+
+``` {r remove_reads, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+  
+# Optionally remove reads
+if (!is.na(manual_read_exclusion_path)) {
+  
+  # Summarise read exclusions
+  consistent_alignment_info <- lapply(file_stem_vector, function(file_stem,
+                                            file_details,
+                                            consistent_alignment_info,
+                                            manual_read_exclusion_list) {
+    
+    # Extract sequencing file, file name and reads to exclude
+    alignment_info <- consistent_alignment_info[[file_stem]]
+    file_name <- file_details$file_name[match(file_stem, file_details$file_stem)]
+    read_exclusions <- manual_read_exclusion_list[[file_name]]
+  
+    # Exclude reads
+    alignment_info <- alignment_info %>%
+      dplyr::filter(!qname %in% read_exclusions)
+      
+    # Output
+    return(alignment_info)
+    
+  },
+  file_details = file_details,
+  consistent_alignment_info = consistent_alignment_info,
+  manual_read_exclusion_list = manual_read_exclusion_list)
+  
+}
+
+```
+
+
+# Split sequences
+
+Divide sequences into specified segments to enable more focused analysis of different parts of the reads, such as repeats and their flanking regions.
+
+``` {r split_sequence_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+split_sequences <- function(alignment_info) {
+  
+  # Reshape alignments wider so each read has one row
+  alignment_info <- alignment_info %>%
+    dplyr::select(c("file_stem", "qname", "alignment_number", "rname", "strand", "ref_start", 
+                    "ref_end", "alignment_length_on_ref", "query_start", "query_end", 
+                    "alignment_length_on_query", "query_sequence", "query_length", 
+                    "mapq", "mismatches", "insertions", "deletions", "cigar")) %>%
+    group_by(file_stem, qname) %>%
+    arrange(query_start, query_end, .by_group = TRUE) %>%
+    dplyr::mutate(alignment_number = row_number()) %>%
+    ungroup() %>%
+    pivot_wider(names_from = alignment_number,
+                values_from = -all_of(c("file_stem", "qname", "query_sequence", "query_length")),
+                names_sep = "_") %>%
+    dplyr::select(file_stem, qname, query_sequence, query_length,
+                  matches("_1$"), matches("_2$")) %>%
+    dplyr::select(-starts_with("alignment_number_"))
+  
+  # Exit if there are no sequences
+  if (nrow(alignment_info) == 0) {
+    return(alignment_info %>%
+             dplyr::mutate(pre = NA,
+                           left = NA,
+                           rpt = NA,
+                           right = NA,
+                           post = NA))
+  }
+  
+  # Split
+  alignment_info <- alignment_info %>%
+    dplyr::mutate(pre = case_when(query_start_1 > 1 ~ str_sub(query_sequence, 1, query_start_1 - 1),
+                                  TRUE ~ NA),
+                  left = ifelse(str_sub(query_sequence, query_start_1, query_end_1) == "", 
+                                NA_character_, 
+                                str_sub(query_sequence, query_start_1, query_end_1)),
+                  mid = ifelse(str_sub(query_sequence, query_end_1 + 1, query_start_2 - 1) == "", 
+                               NA_character_, 
+                               str_sub(query_sequence, query_end_1 + 1, query_start_2 - 1)),
+                  right = ifelse(str_sub(query_sequence, query_start_2, query_end_2) == "", 
+                                 NA_character_, 
+                                 str_sub(query_sequence, query_start_2, query_end_2)),
+                  post = case_when(nchar(query_sequence) > query_end_2 ~ str_sub(query_sequence, query_end_2 + 1, nchar(query_sequence)),
+                                   TRUE ~ NA))
+  
+  # Output
+  return(alignment_info)
+  
+}
+
+```
+
+
+``` {r split_sequences, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+split_alignment_info <- pblapply(consistent_alignment_info, split_sequences)
+
+```
+
+
+# Find repeats
+
+Identify repetitive sequence patterns within the data, specifically targeting regions with known or suspected repeats.
+
+``` {r find_repeat_tracts_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+find_repeat_tracts <- function(sequence,
+                               pattern,
+                               min_repeats = 3,
+                               max_mismatch = 0,
+                               start_perfect_repeats = 1,
+                               end_perfect_repeats = 1,
+                               max_repeat_gap = 3,
+                               max_tract_gap = NULL,
+                               return_option = "all") {
+  
+  # Exit if there is no sequence
+  if (is.na(sequence)) {
+    return(list(start = NA, end = NA, repeat_count = NA))
+  }
+  
+  # Find repeat units throughout the sequence
+  matches <- matchPattern(pattern = pattern, 
+                          subject = DNAString(sequence), 
+                          max.mismatch = max_mismatch)
+  
+  # Exit if no matches found
+  if (length(matches) == 0) {
+    return(list(start = NA, end = NA, repeat_count = NA))
+  }
+  
+  # Check if only one match is found
+  if (length(matches) == 1) {
+    # If only one match and it doesn't meet min_repeats, return NA
+    if (min_repeats > 1) {
+      return(list(start = NA, end = NA, repeat_count = NA))
+    } else {
+      return(list(start = start(matches)[1], end = end(matches)[1], repeat_count = 1))
+    }
+  }
+  
+  # Initiate lists to store repeat tract information
+  tracts <- list()
+  current_tract <- list(start = start(matches)[1], 
+                        end = end(matches)[1], 
+                        repeat_count = 1)
+  
+  # Analyse the matches to form repeat tracts
+  for (i in 2:length(matches)) {
+    
+    # Measure gap between this match and the next
+    gap_between_matches <- start(matches)[i] - end(matches)[i - 1] - 1
+    
+    # Use the gap to determine whether to end the current repeat tract
+    if (gap_between_matches <= max_repeat_gap) {
+      
+      # Update repeat tract end
+      current_tract$end <- end(matches)[i]
+      
+      # Increment repeat count
+      current_tract$repeat_count <- current_tract$repeat_count + 1
+      
+      # If the gap is too large, store the current tract and start a new one
+    } else {
+      
+      # Store the current tract if it is long enough
+      if (current_tract$repeat_count >= min_repeats) {
+        tracts[[length(tracts) + 1]] <- current_tract
+      }
+      
+      # Initiate a new tract starting at the current match
+      current_tract <- list(start = start(matches)[i], 
+                            end = end(matches)[i], 
+                            repeat_count = 1)
+    }
+  }
+  
+  # Store the current tract if it meets the minimum repeat requirement
+  if (current_tract$repeat_count >= min_repeats) {
+    tracts[[length(tracts) + 1]] <- current_tract
+  }
+  
+  # Optionally combine tracts that are within the tract_gap distance
+  if (!is.null(max_tract_gap) && length(tracts) > 1) {
+    
+    # Initialise lists to store combined tract information
+    combined_tracts <- list()
+    current_tract <- tracts[[1]]
+    
+    # Analyse gap between tracts
+    for (i in 2:length(tracts)) {
+      
+      # Calcualte gap between start of next and end of current tract
+      gap_between_tracts <- tracts[[i]]$start - current_tract$end - 1
+      
+      # If the gap is small enough, merge the tracts by extending the current tract
+      if (gap_between_tracts <= max_tract_gap) {
+        current_tract$end <- tracts[[i]]$end
+        current_tract$repeat_count <- current_tract$repeat_count + tracts[[i]]$repeat_count
+        
+        # If the gap is too large, add the current tract to the combined tracts list as it is, then move on to the next tract
+      } else {
+        combined_tracts[[length(combined_tracts) + 1]] <- current_tract
+        current_tract <- tracts[[i]]
+      }
+    }
+    
+    # Add the current tract to the combined tracts list
+    combined_tracts[[length(combined_tracts) + 1]] <- current_tract
+    
+    # Overwrite the tracts list with the new combined tracts
+    tracts <- combined_tracts
+  }
+  
+  # Trim the start and end points of each tract based on perfect repeat constraints
+  trimmed_tracts <- lapply(tracts, function(tract) {
+    
+    # Trim forward from the start for x perfect repeats
+    if (start_perfect_repeats > 0) {
+      
+      # Review the repeat tract from start to n=[start_perfect_repeats * pattern length] from the end
+      for (pos in seq(tract$start, tract$end - (start_perfect_repeats * nchar(pattern)) + 1)) {
+        
+        # Compare the next n bases from the current position with the perfect repeat pattern
+        if (identical(substring(sequence, pos, pos + (start_perfect_repeats * nchar(pattern)) - 1), 
+                      paste(rep(pattern, start_perfect_repeats), collapse = ""))) {
+          
+          # Trim the start to the position of a match and stop the loop
+          tract$start <- pos
+          break
+        }
+      }
+    }
+    
+    # Trim backward from the end for y perfect repeats
+    if (end_perfect_repeats > 0) {
+      
+      # Review the repeat tract in reverse from the end to n=[start_perfect_repeats * pattern length] from the start
+      for (pos in seq(tract$end, tract$start + (end_perfect_repeats * nchar(pattern)) - 1, by = -1)) {
+        
+        # Compare the next n bases from the current position with the perfect repeat pattern
+        if (identical(substring(sequence, pos - (end_perfect_repeats * nchar(pattern)) + 1, pos), 
+                      paste(rep(pattern, end_perfect_repeats), collapse = ""))) {
+          
+          # Trim the end to the position of a match and stop the loop
+          tract$end <- pos
+          break
+        }
+      }
+    }
+    
+    return(tract)
+  })
+  
+  # Return the tract based on the user's selection
+  # First tract
+  if (length(tracts) == 0) {
+    return(list(start = NA, end = NA, repeat_count = NA))
+  } else if (return_option == "first") {
+    return(trimmed_tracts[[1]])
+    # Longest tract
+  } else if (return_option == "longest") {
+    longest_tract <- trimmed_tracts[[which.max(sapply(trimmed_tracts, function(t) t$end - t$start))]]
+    return(longest_tract)
+    # Default return all tracts
+  } else {
+    return(trimmed_tracts)
+  }
+  
+}
+
+```
+
+
+``` {r apply_find_repeat_tracts_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+apply_find_repeat_tracts <- function(data, 
+                                     sequence_column,
+                                     pattern, 
+                                     min_repeats = 3,
+                                     max_mismatch = 1,
+                                     start_perfect_repeats = 1,
+                                     end_perfect_repeats = 1,
+                                     max_repeat_gap = 0,
+                                     max_tract_gap = NULL,
+                                     return_option = "all") {
+  
+  # Exit if there are no sequences
+  if (nrow(data) == 0) {
+    return(data %>%
+             dplyr::mutate(!!paste0(sequence_column, ".1") := !!sym(sequence_column),
+                           !!paste0(sequence_column, ".2") := NA,
+                           !!paste0(sequence_column, ".3") := NA,
+                           !!paste0(sequence_column, "_pattern_start" ) := NA,
+                           !!paste0(sequence_column, "_pattern_end") := NA,
+                           !!paste0(sequence_column, "_pattern_repeat_count") := NA) %>%
+             relocate(starts_with(sequence_column), .after = sequence_column) %>%
+             dplyr::select(-!!sym(sequence_column)))
+  }
+  
+  # Find repeat
+  data <- data %>%
+    rowwise() %>%
+    dplyr::mutate(
+      split = list(find_repeat_tracts(!!sym(sequence_column),
+                                      pattern = pattern,
+                                      min_repeats = min_repeats,
+                                      max_mismatch = max_mismatch,
+                                      start_perfect_repeats = start_perfect_repeats,
+                                      end_perfect_repeats = end_perfect_repeats,
+                                      max_repeat_gap = max_repeat_gap,
+                                      max_tract_gap = max_tract_gap,
+                                      return_option = "longest")),
+      pattern_start = split$start,
+      pattern_end = split$end,
+      pattern_repeat_count = split$repeat_count,
+      !!sym(paste0(sequence_column, ".1")) := case_when(is.na(pattern_start) ~ !!sym(sequence_column),
+                                                      TRUE ~ ifelse(nchar(substr(!!sym(sequence_column), 1, pattern_start - 1)) == 0,
+                                                                    NA,
+                                                                    substr(!!sym(sequence_column), 1, pattern_start - 1))),
+      !!sym(paste0(sequence_column, ".2")) := case_when(is.na(pattern_start) ~ NA,
+                                                      TRUE ~ ifelse(nchar(substr(!!sym(sequence_column), pattern_start, pattern_end)) == 0,
+                                                                    NA,
+                                                                    substr(!!sym(sequence_column), pattern_start, pattern_end))),
+      !!sym(paste0(sequence_column, ".3")) := case_when(is.na(pattern_start) ~ NA,
+                                                      TRUE ~ ifelse(nchar(substr(!!sym(sequence_column), pattern_end + 1, nchar(!!sym(sequence_column)))) == 0,
+                                                                    NA,
+                                                                    substr(!!sym(sequence_column), pattern_end + 1, nchar(!!sym(sequence_column)))))) %>%
+    relocate(starts_with(paste0(sequence_column, ".")), .after = sequence_column) %>%
+    relocate(c(starts_with("pattern_")), .after = paste0(sequence_column, ".3")) %>%
+    dplyr::select(-split, -!!sym(sequence_column)) %>%
+    ungroup()
+  
+  # Rename columns, replace blanks with NA, and drop processing columns
+  data <- data %>% 
+    dplyr::rename(!!sym(paste0(sequence_column, "_pattern_start")) := pattern_start,
+                  !!sym(paste0(sequence_column, "_pattern_end")) := pattern_end,
+                  !!sym(paste0(sequence_column, "_pattern_repeat_count")) := pattern_repeat_count)
+    
+  # Output
+  return(data)
+}
+  
+```
+
+
+``` {r find_repeat, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Run repeat finder function
+my_path <- file.path(out_dir, "temp", "find_repeat.RData")
+if (file.exists(my_path)) {
+  load(my_path)
+} else {
+  repeat_alignment_info <- pblapply(split_alignment_info,
+                                    apply_find_repeat_tracts,
+                                    sequence_column = "mid",
+                                    pattern = rpt_pattern,
+                                    min_repeats = min_repeats,
+                                    max_mismatch = max_mismatch,
+                                    start_perfect_repeats = start_perfect_repeats,
+                                    end_perfect_repeats = end_perfect_repeats,
+                                    max_repeat_gap = max_repeat_gap,
+                                    max_tract_gap = max_tract_gap,
+                                    return_option = rpt_return_option)
+  save(repeat_alignment_info, file = my_path)
+}
+
+```
+
+
+# Process immediate flanks
+
+Examine the segment containing the repeat, specifically focusing on portions outside the repeat tract. The left side of this segment is added to the left flank, while the right side is isolated for separate analysis as the *focus region*.
+
+``` {r summarise_sequence_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to summarise repeat sequences with user-defined min and max repeat unit length
+summarise_sequence <- function(sequence, 
+                               min_repeat_length = NA, 
+                               max_repeat_length = NA,
+                               exclude_repeat_lengths = NA,
+                               prefer_short_or_long = "short") {
+  
+  # Exit if there is no sequence
+  if (is.na(sequence)) {
+    return(NA)
+  }
+  
+  # Define defaults for min and max repeat lengths if they are NA
+  if (is.na(min_repeat_length)) {
+    min_repeat_length <- 1
+  }
+  
+  if (is.na(max_repeat_length)) {
+    max_repeat_length <- floor(nchar(sequence) / 2)
+  }
+  
+  # Helper function to find the longest repeat unit at a given position
+  find_repeat_unit <- function(seq, pos, min_len, max_len, exclude_len, prefer_short_or_long) {
+    
+    # Define variables
+    n <- nchar(seq)
+    best_unit <- ""
+    best_count <- 0
+    
+    # Determine the range for repeat length iteration
+    lengths <- if (prefer_short_or_long == "long") max_len:min_len else min_len:max_len
+    
+    
+    for (len in lengths) {  # Check repeat units within the min and max length range
+      
+      if (!is.null(exclude_len) && len %in% exclude_len) next # Skip repeat unit lengths that are excluded
+      
+      unit <- substr(seq, pos, pos + len - 1)
+      if (nchar(unit) < len || pos + len - 1 > n) next  # Ensure valid substring range
+      
+      count <- 0
+      while (substr(seq, pos + count * len, pos + (count + 1) * len - 1) == unit) {
+        count <- count + 1
+      }
+      
+      if (count > 1) {  # Keep repeats of more than 1
+        best_unit <- unit
+        best_count <- count
+        break # Exit after finding the first valid repeat according to preference
+      }
+    }
+    
+    list(unit = best_unit, count = best_count)
+  }
+  
+  # Main function logic
+  n <- nchar(sequence)
+  summarised <- c()
+  i <- 1
+  
+  # Summarise repeats
+  while (i <= n) {
+    max_len <- min(max_repeat_length, n - i + 1)  # Adjust repeat length based on remaining sequence
+    repeat_info <- find_repeat_unit(sequence, i, min_repeat_length, max_len, 
+                                    exclude_repeat_lengths, prefer_short_or_long)
+    
+    if (repeat_info$count > 1) {
+      summarised <- c(summarised, paste0("[", repeat_info$unit, "]", repeat_info$count))
+      i <- i + nchar(repeat_info$unit) * repeat_info$count
+    } else {
+      summarised <- c(summarised, substr(sequence, i, i))
+      i <- i + 1
+    }
+  }
+  
+  # Collapse sequence
+  summarised <- paste(summarised, collapse = "")
+  
+  # Combine consecutive single characters and remove single repeats
+  summarised <- gsub("\\[([A-Z]+)\\]1(?![0-9])", "\\1", summarised, perl = TRUE)
+  
+  # Output
+  return(summarised)
+}
+
+```
+
+
+``` {r na_to_blank_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to replace NA with blank
+na_to_blank <- function(string) {
+  ifelse(is.na(string), "", string)
+}
+
+```
+
+
+``` {r column_process_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Flank processing function
+column_process <- function(data, 
+                           sequence_column, 
+                           action = "summarise", 
+                           recipient_column = NULL,
+                           min_repeat_length = NULL, 
+                           max_repeat_length = NULL,
+                           exclude_repeat_lengths = NULL,
+                           prefer_short_or_long = NULL) {
+  
+  # Summarise
+  if (action == "summarise") {
+    data <- data %>%
+      rowwise() %>%
+      dplyr::mutate(!!sym(paste0(sequence_column, "_summary")) := summarise_sequence(!!sym(sequence_column),
+                                                                                     min_repeat_length = min_repeat_length, 
+                                                                                     max_repeat_length = max_repeat_length,
+                                                                                     exclude_repeat_lengths = exclude_repeat_lengths,
+                                                                                     prefer_short_or_long = prefer_short_or_long)) %>%
+      ungroup() %>%
+      relocate(!!sym(paste0(sequence_column, "_summary")), .after = sequence_column)
+    
+    # Move to the end of another column
+  } else if (action == "move_to_end") {
+    data <- data %>%
+      dplyr::mutate(!!sym(recipient_column) := paste0(na_to_blank(!!sym(recipient_column)),
+                                                      na_to_blank(!!sym(sequence_column))),
+                    !!sym(sequence_column) := NA)
+    
+    # Move to the start of another column
+  } else if (action == "move_to_start") {
+    data <- data %>%
+      dplyr::mutate(!!sym(recipient_column) := paste0(na_to_blank(!!sym(sequence_column)),
+                                                      na_to_blank(!!sym(recipient_column))),
+                    !!sym(sequence_column) := NA)
+  }
+  
+  # Output
+  return(data)
+  
+}
+
+```
+
+
+``` {r flank_process, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Run repeat finder function
+my_path <- file.path(out_dir, "temp", "process_immediate_flanks.RData")
+if (file.exists(my_path)) {
+  load(my_path)
+} else {
+  
+  # Run
+  process_alignment_info <- pblapply(repeat_alignment_info, function(alignment_info,
+                                                                     sumseq_min_repeat_length,
+                                                                     sumseq_max_repeat_length,
+                                                                     sumseq_exclude_repeat_lengths,
+                                                                     sumseq_prefer_short_or_long) {
+    
+    # Process mid.1
+    alignment_info <- column_process(data = alignment_info,
+                                     sequence_column = "mid.1",
+                                     action = "move_to_end",
+                                     recipient_column = "left",
+                                     min_repeat_length = NULL, 
+                                     max_repeat_length = NULL,
+                                     exclude_repeat_lengths = NULL,
+                                     prefer_short_or_long = NULL)
+    
+    # # Process mid.3
+    # alignment_info <- column_process(data = alignment_info,
+    #                                 sequence_column = "mid.3",
+    #                                 action = "summarise",
+    #                                 recipient_column = NULL,
+    #                                 min_repeat_length = sumseq_min_repeat_length, 
+    #                                 max_repeat_length = sumseq_max_repeat_length,
+    #                                 exclude_repeat_lengths = sumseq_exclude_repeat_lengths,
+    #                                 prefer_short_or_long = sumseq_prefer_short_or_long)
+    
+    # Output
+    return(alignment_info)
+  },
+  sumseq_min_repeat_length = sumseq_min_repeat_length,
+  sumseq_max_repeat_length = sumseq_max_repeat_length,
+  sumseq_exclude_repeat_lengths = sumseq_exclude_repeat_lengths,
+  sumseq_prefer_short_or_long = sumseq_prefer_short_or_long)
+  
+  # Save
+  save(process_alignment_info, file = my_path)
+}
+
+```
+
+
+# Count repeats
+
+Determine the length of the repeat tract in each read.
+
+``` {r count_repeat_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to count repeats
+count_repeats <- function(data, sequence_column, repeat_unit_length, round_digits) {
+  data %>%
+    dplyr::mutate(!!paste0(sequence_column, "_repeat_bp") := 
+                    ifelse(is.na(!!sym(sequence_column)),
+                    0L,
+                    nchar(!!sym(sequence_column))),
+                  !!paste0(sequence_column, "_repeat_n") := 
+                    ifelse(is.na(!!sym(sequence_column)),
+                    0,
+                    round(!!sym(paste0(sequence_column, "_repeat_bp")) / repeat_unit_length, 
+                          digits = round_digits))) %>%
+    relocate(c(paste0(sequence_column, "_repeat_bp"), paste0(sequence_column, "_repeat_n")),
+             .after = sequence_column)
+}
+
+```
+
+
+``` {r count_repeats, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+count_alignment_info <- lapply(process_alignment_info,
+                               count_repeats,
+                               sequence_column = "mid.2",
+                               repeat_unit_length = nchar(rpt_pattern),
+                               round_digits = 0)
+
+
+# temp <- count_alignment_info$`Mike_run1_6-97ng_7-119fmol_120324_adptSa-6`
+# temp$qname[[1]]
+
+```
+
+
+# Repeat length distribution
+
+Analyse the distribution of repeat lengths across all reads and identify peaks.
+
+## Find peaks
+
+``` {r find_peaks_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Combined function to find modes or local maxima
+find_peaks <- function(numbers, max_peaks = NA, tie_break = NA, option = "mode", floor = NA) {
+  
+  # Remove NA
+  numbers <- as.numeric(na.omit(numbers))
+  
+  # Exit if there are 0 or only 1 number
+  if (length(numbers) == 0) {
+    return(NA)
+  } else if (length(numbers) == 1) {
+    return(numbers)
+  }
+  
+  # Calculate frequency of each unique value
+  frequency_table <- data.frame(table(numbers)) %>%
+    dplyr::rename(number = numbers, freq = Freq) %>%
+    dplyr::mutate(number = as.numeric(as.character(number))) %>%
+    arrange(desc(freq))
+  
+  # Set floor value frequency
+  max_frequency <- frequency_table$freq[[1]]
+  if (floor < 1) {
+    floor_frequency <- floor * max_frequency
+  } else if (floor >= 1) {
+    floor_frequency <- floor
+  } else {
+    floor_frequency <- 1
+  }
+  
+  # Filter for values more frequent that the floor frequency
+  frequency_table <- frequency_table %>%
+    dplyr::filter(freq >= floor_frequency)
+  numbers <- numbers[numbers %in% frequency_table$number]
+  
+  # Find mode/s
+  if (option == "mode") {
+    
+    # Sort numbers by frequency
+    if (tie_break == "smallest") {
+      frequency_table <- frequency_table %>%
+        arrange(desc(freq), number)
+    } else if (tie_break == "largest") {
+      frequency_table <- frequency_table %>%
+        arrange(desc(freq), desc(number))
+    } else {
+      frequency_table <- frequency_table %>%
+        arrange(desc(freq))
+    }
+    
+    # If max peaks is not specified return just the commonest value
+    if (is.na(max_peaks)) {
+      max_peaks <- 1
+    }
+    
+    # Select the number of peaks
+    frequency_table <- frequency_table %>%
+      slice_head(n = max_peaks)
+    
+    # Extract peaks
+    peak_values <- frequency_table$number
+    
+  # Find local maxima
+  } else if (option == "local_maxima") {
+    
+    # Calculate density
+    dens <- density(numbers, bw = "nrd0")
+    
+    # Find indices of local maxima (peaks) in the density data
+    peak_indices <- which(diff(sign(diff(dens$y))) == -2)
+    
+    # Get the x-values (repeat lengths) at these peak indices
+    peak_values <- dens$x[peak_indices]
+    
+    # If max_peaks is specified, limit the number of peaks
+    if (!is.na(max_peaks)) {
+      
+      # Get the y-values (densities) at these peak indices
+      peak_densities <- dens$y[peak_indices]
+      
+      # Order peaks by their density values in decreasing order and pick the top max_peaks
+      top_peaks <- order(peak_densities, decreasing = TRUE)[1:min(max_peaks, length(peak_values))]
+      
+      # Get the peak values corresponding to the top peaks
+      peak_values <- peak_values[top_peaks]
+    }
+    
+  # Find mean
+  } else if (option == "mean") {
+    peak_values <- mean(numbers)
+  } else {
+    stop("Invalid option. Please specify 'mode' or 'local_maxima' for the option parameter.")
+  }
+  
+  # Output
+  return(list(peak_values = peak_values,
+              floor_frequency = floor_frequency))
+}
+
+```
+
+
+``` {r find_peaks, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Find peaks
+repeat_peaks <- lapply(file_stem_vector, function(file_stem,
+                                                  count_alignment_info,
+                                                  max_peaks,
+                                                  peak_tie_break,
+                                                  peak_option,
+                                                  split_peak_threshold,
+                                                  peak_floor = peak_floor) {
+  
+  # Extract alignment information
+  alignment_info <- count_alignment_info[[file_stem]]
+  
+  # Assign to groups by threshold repeat length
+  alignment_info <- alignment_info %>%
+    dplyr::mutate(peak_group = case_when(is.na(split_peak_threshold) ~ "A",
+                                         mid.2_repeat_n < split_peak_threshold ~ "A",
+                                         mid.2_repeat_n >= split_peak_threshold ~ "B",
+                                         TRUE ~ NA)) %>%
+    relocate(peak_group, .after = "mid.2_repeat_n")
+  
+  # Separate peak groups into a list
+  peak_groups <- alignment_info %>%
+    split(f = as.factor(.$peak_group))
+  
+  # Peak group names
+  peak_group_names <- setNames(names(peak_groups), names(peak_groups))
+  
+  # Find peaks in each group
+  peak_results <- lapply(peak_group_names, function(peak_group_name,
+                                                    peak_groups,
+                                                    max_peaks,
+                                                    peak_tie_break,
+                                                    peak_option,
+                                                    file_stem,
+                                                    peak_floor) {
+    peak_group <- peak_groups[[peak_group_name]]
+    peak_result <- find_peaks(numbers = peak_group$mid.2_repeat_n,
+                              max_peaks = max_peaks,
+                              tie_break = peak_tie_break,
+                              option = peak_option,
+                              floor = peak_floor)
+    peak_df <- data.frame(file_stem = file_stem,
+                          peak_group = peak_group_name,
+                          floor_frequency = peak_result$floor_frequency,
+                          peak_number = seq_along(peak_result$peak_values),
+                          repeat_n = peak_result$peak_values)
+    return(peak_df)
+  },
+  peak_groups = peak_groups,
+  max_peaks = max_peaks,
+  peak_tie_break = peak_tie_break,
+  peak_option = peak_option,
+  file_stem = file_stem,
+  peak_floor = peak_floor)
+  
+  # Rbind
+  peak_results <- rbindlist(peak_results)
+  
+  # Output
+  return(peak_results)
+  
+},
+count_alignment_info = count_alignment_info,
+max_peaks = max_peaks,
+peak_tie_break = peak_tie_break,
+peak_option = peak_option,
+split_peak_threshold = split_peak_threshold,
+peak_floor = peak_floor)
+
+
+# Rbind
+repeat_peaks <- rbindlist(repeat_peaks)
+
+# Display table
+kbl(repeat_peaks, caption = "Repeat length peaks") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Create directory
+my_path <- file.path(out_dir, "repeat_distribution")
+if (!dir.exists(my_path)) {
+  dir.create(my_path)
+}
+
+# Export tables
+write_excel_function(named_list = list("repeat_peaks" = repeat_peaks),
+                     path = file.path(my_path, "repeat_peaks.xlsx"),
+                     overwrite = TRUE)
+
+```
+
+
+## Points
+
+``` {r plot_repeat_points, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE, fig.height=8, fig.width=12}
+
+# Calculate mean number of points per sample
+mean_points_per_sample <- rbindlist(count_alignment_info) %>%
+  group_by(file_stem) %>%
+  dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  dplyr::summarise(mean_n = mean(n, na.rm = TRUE)) %>%
+  pull(mean_n)
+
+# Calculate inverted interpolation factor (between 1 and 0) (higher point counts give a smaller number)
+interpolation_factor <- 1 - (mean_points_per_sample - datapoint_range[1]) / (datapoint_range[2] - datapoint_range[1])
+interpolation_factor <- max(0, min(1, interpolation_factor))  # Ensure within [0, 1]
+
+# Calculate point size and alpha based on the interpolation factor
+point_size <- point_size_range[1] + interpolation_factor * (point_size_range[2] - point_size_range[1])
+point_alpha <- alpha_range[1] + interpolation_factor * (alpha_range[2] - alpha_range[1])
+
+# Plot
+rbindlist(count_alignment_info) %>%
+  ggplot(aes(x = file_stem, y = mid.2_repeat_n)) +
+  geom_violin(trim = TRUE, scale = "width") +
+  # geom_jitter(height = 0, width = 0.25, size = 2, alpha = 0.2, shape = 21, fill = "skyblue") +
+  geom_jitter(height = 0, width = 0.25, size = point_size, alpha = point_alpha, colour = "skyblue") +
+  geom_point(data = repeat_peaks,
+             aes(x = file_stem, y = repeat_n),
+             shape = 23, fill = "red", colour = "black", size = 3, alpha = 0.8) +
+  geom_text(data = repeat_peaks,
+            aes(x = file_stem, y = repeat_n, label = round(..y.., 1)),
+            colour = "red", 
+            # position = position_nudge(x = 0.4), size = 3
+            angle = 45, vjust = -0.5, hjust = -0.5, size = 3) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                 guide = guide_axis(angle = 70)) +
+  scale_y_continuous(breaks = pretty_breaks(n = 10)) +
+  labs(x = "File stem",
+       y = "Repeat length") +
+  theme_minimal() +
+  theme(text = element_text(size = base_text_size),
+        axis.text.x = element_text(size = 0.5 * base_text_size),
+        axis.text.y = element_text(size = 0.7 * base_text_size))
+
+# Export plot
+for (plot_format in plot_formats) {
+  ggsave(filename = file.path(my_path, paste0("repeat_points", plot_format)),
+       plot = last_plot(),
+       height = 6, width = 10)
+}
+
+```
+
+
+## Histogram
+
+``` {r plot_repeat_histogram_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to plot repeat frequency distribution
+plot_frequency_histogram <- function(numbers, 
+                                     peaks = NULL,
+                                     binwidth = 1, 
+                                     x_breaks = 10,
+                                     base_text_size = 18) {
+  
+  # Format
+  df <- data.frame(number = numbers)
+  
+  # Plot count
+  my_plot <-
+    ggplot(df, aes(x = number)) +
+    geom_histogram(binwidth = binwidth, fill = "skyblue", colour = "black", alpha = 0.7) +
+    { if (!is.null(peaks) && !is.na(peaks[1])) {
+      geom_vline(xintercept = peaks, linetype = "dashed", colour = "darkgreen")
+    }} +
+    { if (!is.null(peaks) && !is.na(peaks[1])) {
+      geom_text(data = data.frame(x = peaks), 
+                aes(x = x, y = Inf, label = round(x, 0)), 
+                angle = 90, vjust = -0.5, hjust = 1, 
+                size = (base_text_size / 4), color = "darkgreen")
+    }} +
+    scale_x_continuous(breaks = pretty_breaks(n = x_breaks),
+                       guide = guide_axis(angle = 45),
+                       limits = c(-(0.5 * binwidth), NA)) +
+    scale_y_continuous(breaks = pretty_breaks()) +
+    labs(x = "Repeat length",
+         y = "Count") +
+    theme_minimal() +
+    theme(text = element_text(size = base_text_size),
+          axis.title = element_text(size = base_text_size))
+    
+  # Output
+  return(my_plot)
+  
+}
+
+```
+
+
+``` {r plot_repeat_histogram, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE, fig.height=6, fig.width=10}
+
+my_plots <- lapply(file_stem_vector, function(my_file_stem,
+                                              count_alignment_info,
+                                              repeat_peaks,
+                                              binwidth,
+                                              x_breaks, 
+                                              base_text_size) {
+  alignment_info <- count_alignment_info[[my_file_stem]]
+  # peaks <- repeat_peaks[[my_file_stem]]
+  peaks <- repeat_peaks %>%
+    dplyr::filter(file_stem == my_file_stem) %>%
+    pull(repeat_n)
+  plot_frequency_histogram(alignment_info$mid.2_repeat_n,
+                           peaks = peaks,
+                           binwidth = binwidth,
+                           x_breaks = x_breaks,
+                           base_text_size = base_text_size)
+},
+count_alignment_info = count_alignment_info,
+repeat_peaks = repeat_peaks,
+binwidth = binwidth,
+x_breaks = x_breaks,
+base_text_size = base_text_size)
+
+
+# Display and export plots
+for (plot_name in names(my_plots)) {
+  my_plot <- my_plots[[plot_name]]
+  if(!is.null(my_plot)) {
+    my_plot <- my_plot + labs(title = plot_name)
+    print(my_plot)
+    for (plot_format in plot_formats) {
+      ggsave(filename = file.path(my_path, paste0(plot_name, ".repeat_histogram", plot_format)),
+           plot = last_plot(),
+           height = 6, width = 10)
+    }
+  }
+}
+
+```
+
+
+# Prepare subsequences
+
+Extract specific regions from each read based on a user-defined analysis window around the repeat tract. The analysis window is centered on both the start and end of the repeat tract, capturing upstream and downstream flanking sequences. The full window encompasses both sides of the repeat, effectively doubling the size of the user-specified analysis window. These subsequences are then used to generate waterfall plots and consensus sequences, focusing on key regions around the repeat tract.
+
+``` {r repeat_recolour, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# User defined repeat colour
+if (is.na(repeat_recolour)) {
+  
+  repeat_colour <- NA
+  
+} else if (repeat_recolour == "blend") {
+  
+  # Convert DNA colours to rgb
+  dna_rgb <- t(sapply(dna_colours, function(col) col2rgb(col) / 255))
+  
+  # Function to blend colours
+  blend_dna_colours <- function(sequence, dna_rgb) {
+    
+    # Count occurrences of each base in the sequence
+    base_counts <- table(strsplit(sequence, "")[[1]])
+    
+    # Ensure all bases are present in the count, even if they have a count of 0
+    all_bases <- setNames(rep(0, nrow(dna_rgb)), rownames(dna_rgb))
+    all_bases[names(base_counts)] <- base_counts
+    
+    # Calculate the proportions of each base
+    base_proportions <- all_bases / sum(all_bases)
+    
+    # Calculate the weighted average of the RGB values
+    blended_rgb <- colSums(dna_rgb * base_proportions)
+    
+    # Convert the blended RGB back to a hex color
+    blended_colour <- rgb(blended_rgb[1], blended_rgb[2], blended_rgb[3], maxColorValue = 1)
+    
+    return(blended_colour)
+  }
+  
+  # Repeat colour
+  repeat_colour = blend_dna_colours(paste(rpt_pattern, collapse = ""),
+                                    dna_rgb = dna_rgb)
+  
+} else {
+  
+  # Otherwise assume repeat_recolour is a user-supplied colour
+  repeat_colour <- repeat_recolour
+  
+}
+
+
+# Add repeat colour to DNA colours
+if (!is.na(repeat_recolour)) {
+  dna_colours <- c(dna_colours, c("R" = repeat_colour))
+  dna_labels <- c(dna_labels, c("R" = "Repeat"))
+}
+
+# Add recoloured repeat column
+recolour_alignment_info <- lapply(count_alignment_info, function(alignment_info) {
+  alignment_info %>%
+    dplyr::mutate(mid.2_recoloured = str_replace_all(mid.2, "[^H]", "R")) %>%
+    relocate(mid.2_recoloured, .after = "mid.2")
+})
+
+```
+
+
+``` {r sequence_generator_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+sequence_generator <- function(data, 
+                               left_columns = NULL, left_length = 100, left_position = "end",
+                               mid_columns = NULL, mid_length = NULL, mid_position = NULL,
+                               right_columns = NULL, right_length = 100, right_position = "start",
+                               out_sequence_name = "new_sequence") {
+  
+  # Concatenate selected columns and apply na_to_blank for the left portion
+  if (!is.null(left_columns)) {
+    data <- data %>%
+      dplyr::mutate(concat_left = apply(select(., all_of(left_columns)), 1, 
+                                        function(x) paste0(na_to_blank(x), collapse = "")))
+    
+    if (is.null(left_length)) {
+      # Include the entire concat_left if left_length is NULL
+      data <- data %>%
+        dplyr::mutate(left_portion = concat_left)
+    } else if (left_position == "end") {
+      # Extract the last 'left_length' characters
+      data <- data %>%
+        dplyr::mutate(left_portion = substr(concat_left, 
+                                            pmax(nchar(concat_left) - left_length + 1, 1), 
+                                            nchar(concat_left)))
+    } else {
+      # Extract the first 'left_length' characters
+      data <- data %>%
+        dplyr::mutate(left_portion = substr(concat_left, 
+                                            1, 
+                                            pmin(left_length, nchar(concat_left))))
+    }
+  } else {
+    data <- data %>%
+      dplyr::mutate(left_portion = "")
+  }
+  
+  # Concatenate mid_columns and apply na_to_blank for the mid portion
+  if (!is.null(mid_columns)) {
+    data <- data %>%
+      dplyr::mutate(concat_mid = apply(select(., all_of(mid_columns)), 1, 
+                                       function(x) paste0(na_to_blank(x), collapse = "")))
+    
+    if (is.null(mid_length)) {
+      # Include the entire concat_mid if mid_length is NULL
+      data <- data %>%
+        dplyr::mutate(mid_portion = concat_mid)
+    } else if (mid_position == "end") {
+      # Extract the last 'mid_length' characters
+      data <- data %>%
+        dplyr::mutate(mid_portion = substr(concat_mid, 
+                                           pmax(nchar(concat_mid) - mid_length + 1, 1), 
+                                           nchar(concat_mid)))
+    } else {
+      # Extract the first 'mid_length' characters
+      data <- data %>%
+        dplyr::mutate(mid_portion = substr(concat_mid, 
+                                           1, 
+                                           pmin(mid_length, nchar(concat_mid))))
+    }
+  } else {
+    data <- data %>%
+      dplyr::mutate(mid_portion = "")
+  }
+  
+  # Concatenate right_columns and apply na_to_blank for the right portion
+  if (!is.null(right_columns)) {
+    data <- data %>%
+      dplyr::mutate(concat_right = apply(select(., all_of(right_columns)), 1, 
+                                         function(x) paste0(na_to_blank(x), collapse = "")))
+    
+    if (is.null(right_length)) {
+      # Include the entire concat_right if right_length is NULL
+      data <- data %>%
+        dplyr::mutate(right_portion = concat_right)
+    } else if (right_position == "end") {
+      # Extract the last 'right_length' characters
+      data <- data %>%
+        dplyr::mutate(right_portion = substr(concat_right, 
+                                             pmax(nchar(concat_right) - right_length + 1, 1), 
+                                             nchar(concat_right)))
+    } else {
+      # Extract the first 'right_length' characters
+      data <- data %>%
+        dplyr::mutate(right_portion = substr(concat_right, 
+                                             1, 
+                                             pmin(right_length, nchar(concat_right))))
+    }
+  } else {
+    data <- data %>%
+      dplyr::mutate(right_portion = "")
+  }
+  
+  # Combine the portions: left, mid, and right
+  data <- data %>%
+    dplyr::mutate(!!sym(out_sequence_name) := paste0(na_to_blank(left_portion), 
+                                                     na_to_blank(mid_portion), 
+                                                     na_to_blank(right_portion)))
+  
+  # Remove processing columns
+  columns_to_remove <- c("concat_left", "left_portion", 
+                         "concat_mid", "mid_portion", 
+                         "concat_right", "right_portion")
+  data <- data %>%
+    dplyr::select(-any_of(columns_to_remove))
+  
+  # Output
+  return(data)
+}
+
+```
+
+
+``` {r prepare_subsequences, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+analysis_alignment_info <- lapply(recolour_alignment_info, function(alignment_info,
+                                                                    analysis_window,
+                                                                    repeat_recolour) {
+  
+  # Repeat column
+  if (is.na(repeat_recolour)) {
+    repeat_column = "mid.2"
+  } else {
+    repeat_column = "mid.2_recoloured"
+  }
+  
+  # Left immediate flank
+  alignment_info <- sequence_generator(data = alignment_info,
+                                       left_columns = c("pre", "left", "mid.1"),
+                                       left_length = analysis_window,
+                                       left_position = "end",
+                                       mid_columns = NULL,
+                                       mid_length = NULL,
+                                       mid_position = NULL,
+                                       right_columns = NULL,
+                                       right_length = NULL,
+                                       right_position = NULL,
+                                       out_sequence_name = "left_end")
+  
+  # Right immediate flank
+  alignment_info <- sequence_generator(data = alignment_info,
+                                       left_columns = NULL,
+                                       left_length = NULL,
+                                       left_position = NULL,
+                                       mid_columns = NULL,
+                                       mid_length = NULL,
+                                       mid_position = NULL,
+                                       right_columns = c("mid.3", "right", "post"),
+                                       right_length = analysis_window,
+                                       right_position = "start",
+                                       out_sequence_name = "right_start")
+  
+  # Waterfall sequence
+  alignment_info <- sequence_generator(data = alignment_info,
+                                       left_columns = c("pre", "left", "mid.1"),
+                                       left_length = analysis_window,
+                                       left_position = "end",
+                                       mid_columns = repeat_column,
+                                       mid_length = NULL,
+                                       mid_position = NULL,
+                                       right_columns = c("mid.3", "right", "post"),
+                                       right_length = analysis_window,
+                                       right_position = "start",
+                                       out_sequence_name = "left_end-rpt-right_start")
+  
+  
+  # Left flank
+  alignment_info <- sequence_generator(data = alignment_info,
+                                       left_columns = c("pre", "left", "mid.1"),
+                                       left_length = analysis_window,
+                                       left_position = "end",
+                                       mid_columns = repeat_column,
+                                       mid_length = analysis_window,
+                                       mid_position = "start",
+                                       right_columns = NULL,
+                                       right_length = NULL,
+                                       right_position = NULL,
+                                       out_sequence_name = "left_end-rpt_start")
+  
+  # Right flank
+  alignment_info <- sequence_generator(data = alignment_info,
+                                       left_columns = NULL,
+                                       left_length = NULL,
+                                       left_position = NULL,
+                                       mid_columns = repeat_column,
+                                       mid_length = analysis_window,
+                                       mid_position = "end",
+                                       right_columns = c("mid.3", "right", "post"),
+                                       right_length = analysis_window,
+                                       right_position = "start",
+                                       out_sequence_name = "rpt_end-right_start")
+  
+  # Right analysis window
+  alignment_info <- sequence_generator(data = alignment_info,
+                                       left_columns = NULL,
+                                       left_length = NULL,
+                                       left_position = NULL,
+                                       mid_columns = NULL,
+                                       mid_length = NULL,
+                                       mid_position = NULL,
+                                       right_columns = c("right", "post"),
+                                       right_length = analysis_window,
+                                       right_position = "start",
+                                       out_sequence_name = "right_window")
+  
+  # Output
+  return(alignment_info)
+  
+},
+analysis_window = analysis_window,
+repeat_recolour = repeat_recolour)
+
+
+# temp <- analysis_alignment_info$`Mike_run1_6-97ng_7-119fmol_120324_adptSa-6`
+# temp$qname
+
+```
+
+
+# Waterfall
+
+Visualise individual sequencing reads in rows, aligning them to highlight sequence patterns relative to the repeat region. Each row represents a read, with the y-axis displaying the repeat length and the x-axis showing the position relative to the repeat, where position 0 marks the start of the repeat tract.
+
+``` {r step_label_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to display axis labels in steps
+step_labels <- function(labels,
+                        cutpoints = c(0, 20, 100, 300, 500, 1000, 5000), 
+                        steps = c(1, 2, 4, 6, 10, 30, 40)) {
+  if (length(cutpoints) != length(steps)) {
+    stop("The length of 'cutpoints' and 'steps' must be the same.")
+  }
+  label_n = length(labels)
+  index <- findInterval(label_n, cutpoints, rightmost.closed = TRUE)
+  step <- steps[index]
+  if (step == 1) {
+    return(labels)
+  }
+  labels[seq_along(labels) %% step != 1] <- ""
+  return(labels)
+}
+
+```
+
+
+``` {r waterfall_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+waterfall <- function(sequences, sequence_names, y_title, colours, colour_labels, cutpoints, steps, 
+                      border_read_limit = NULL, base_text_size = NULL, offset = NULL) {
+  
+  # Format long by position
+  waterfall_df <- data.frame(sequence_name = sequence_names,
+                             sequence = sequences) %>%
+    dplyr::mutate(sequence_length = nchar(sequence)) %>%
+    arrange(desc(sequence_length)) %>%
+    dplyr::mutate(sequence = strsplit(as.character(sequence), ""), 
+                  sequence_number = row_number()) %>%
+    unnest(sequence) %>%
+    group_by(sequence_number) %>%
+    dplyr::mutate(position = row_number()) %>%
+    ungroup()
+  
+  # Offset x-axis 0
+  if (!is.null(offset)) {
+    waterfall_df <- waterfall_df %>%
+      dplyr::mutate(position = position - offset)
+  }
+  
+  # Set levels
+  if (!is.null(colours)) {
+    waterfall_df <- waterfall_df %>%
+      dplyr::mutate(sequence = fct_relevel(sequence, names(dna_colours)))
+  }
+  
+  # Sequence rename vector
+  sequence_rename <- waterfall_df %>%
+    distinct(sequence_number, sequence_name)
+  sequence_rename <- setNames(step_labels(sequence_rename$sequence_name,
+                                          cutpoints = cutpoints, 
+                                          steps = steps), 
+                              sequence_rename$sequence_number)
+  
+  # Count reads
+  read_count <- sum(!is.na(sequences))
+  
+  # Set base text size
+  if (is.null(base_text_size)) {
+    base_text_size <- 12
+  }
+  
+  # Plot
+  my_plot <-
+    ggplot(waterfall_df, aes(x = position, y = as.factor(sequence_number))) +
+    geom_tile(aes(fill = sequence)) +
+    { if (!is.null(colours)) {
+      scale_fill_manual(values = colours,
+                        labels = colour_labels)
+    }} +
+    # scale_x_continuous(breaks = pretty_breaks()) +
+    scale_x_continuous(breaks = pretty_breaks(),
+                     guide = guide_axis(angle = 45)) +
+    scale_y_discrete(labels = sequence_rename) +
+    labs(x = "Position (bp)",
+         y = y_title,
+         fill = "Sequence") +
+    theme_minimal() +
+    { if (!is.null(border_read_limit) && read_count < border_read_limit) {
+      geom_segment(data = waterfall_df, aes(x = position - 0.5, xend = position + 0.5,
+                                            y = sequence_number - 0.5, yend = sequence_number - 0.5),  # Bottom border
+                   colour = "black", size = 0.1)
+    }} +
+    { if (!is.null(border_read_limit) && read_count < border_read_limit) {
+      geom_segment(data = waterfall_df, aes(x = position - 0.5, xend = position + 0.5,
+                                            y = sequence_number + 0.5, yend = sequence_number + 0.5),  # Top border
+                   colour = "black", size = 0.1)
+    }} +
+    theme(text = element_text(size = base_text_size),
+          axis.title = element_text(size = base_text_size),
+          # axis.text.y = element_text(size = 0.5 * base_text_size),
+          legend.title = element_text(size = base_text_size),
+          legend.text = element_text(size = (0.7 * base_text_size)))
+  
+  # Output
+  return(my_plot)
+  
+}
+
+```
+
+
+``` {r waterfall, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE, fig.height=10, fig.width=12}
+
+my_plots <- lapply(analysis_alignment_info, function(alignment_info,
+                                                     dna_colours,
+                                                     dna_labels,
+                                                     read_count_cutpoints,
+                                                     label_display_steps,
+                                                     base_text_size,
+                                                     analysis_window) {
+  
+  if (nrow(alignment_info) == 0) {
+    return(NULL)
+  }
+  waterfall(sequences = alignment_info$`left_end-rpt-right_start`,
+            sequence_names = alignment_info$mid.2_repeat_n,
+            y_title = "Repeat length",
+            colours = dna_colours,
+            colour_labels = dna_labels,
+            cutpoints = read_count_cutpoints,
+            steps = label_display_steps,
+            border_read_limit = 1000,
+            base_text_size = base_text_size,
+            offset = analysis_window)
+},
+dna_colours = dna_colours,
+dna_labels = dna_labels,
+read_count_cutpoints = read_count_cutpoints,
+label_display_steps = label_display_steps,
+base_text_size = base_text_size,
+analysis_window = analysis_window)
+
+
+# Create directory
+my_path <- file.path(out_dir, "waterfall")
+if (!dir.exists(my_path)) {
+  dir.create(my_path)
+}
+
+# Display and export plots
+for (plot_name in names(my_plots)) {
+  my_plot <- my_plots[[plot_name]]
+  if(!is.null(my_plot)) {
+    my_plot <- my_plot + labs(title = plot_name)
+    print(my_plot)
+    for (plot_format in plot_formats) {
+      ggsave(filename = file.path(my_path, paste0(plot_name, ".waterfall", plot_format)),
+           plot = last_plot(),
+           height = 10, width = 12)
+    }
+  }
+}
+
+```
+
+
+# Split waterfall
+
+This version of the waterfall plot separates the left flank, repeat, and right flank regions.
+
+``` {r split_waterfall_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+split_waterfall <- function(sequences1,
+                            sequences2 = NA,
+                            sequences3 = NA,
+                            sequences4 = NA,
+                            sequences5 = NA,
+                            sequences1_name = NULL,
+                            sequences2_name = NULL,
+                            sequences3_name = NULL,
+                            sequences4_name = NULL,
+                            sequences5_name = NULL,
+                            sequences1_align = "left",
+                            sequences2_align = "left",
+                            sequences3_align = "left",
+                            sequences4_align = "left",
+                            sequences5_align = "left",
+                            sequence_names = NULL,
+                            y_title = NULL, 
+                            length_sort_sequence = "sequence1",
+                            colours = NULL, 
+                            colour_labels = NULL,
+                            cutpoints,
+                            steps,
+                            x_breaks = NULL,
+                            border_read_limit = NULL,
+                            base_text_size = NULL) {
+  
+  # Sort sequences based on combined sequence length
+  sequence_df <- data.frame(sequence_name = sequence_names,
+                            sequences1 = sequences1,
+                            sequences2 = sequences2,
+                            sequences3 = sequences3,
+                            sequences4 = sequences4,
+                            sequences5 = sequences5) %>%
+    rowwise() %>%
+    mutate(length = sum(nchar(across(all_of(length_sort_sequence))))) %>%
+    ungroup() %>%
+    arrange(desc(length))
+  
+  # New sequence labels in the correct order
+  my_sequence_names <- sequence_df$sequence_name
+  
+  # Function to format sequences
+  format_position <- function(sequences, sequence_names, alignment = "left") {
+    
+    # Reshape sequences to long format
+    formatted_df <- data.frame(sequence_name = sequence_names,
+                               sequence = sequences) %>%
+      dplyr::mutate(sequence = strsplit(as.character(sequence), ""), 
+                    sequence_number = row_number()) %>%
+      unnest(sequence) %>%
+      group_by(sequence_number) %>%
+      dplyr::mutate(position = row_number()) %>%
+      ungroup()
+    
+    # Adjust positions for to align right
+    if (alignment == "right") {
+      formatted_df <- formatted_df %>%
+        group_by(sequence_number) %>%
+        mutate(max_length = max(position),
+               position = position - max_length - 1) %>%
+        ungroup() %>%
+        dplyr::select(-max_length)
+    }
+    
+    # Output
+    return(formatted_df)
+    
+  }
+  
+  # Sequence types
+  sequence_types <- c("sequences1", "sequences2", "sequences3", "sequences4", "sequences5")
+  names(sequence_types) <- sequence_types
+  
+  # Sequences as a list
+  my_sequences <- list(sequences1 = sequence_df$sequences1,
+                       sequences2 = sequence_df$sequences2,
+                       sequences3 = sequence_df$sequences3,
+                       sequences4 = sequence_df$sequences4,
+                       sequences5 = sequence_df$sequences5)
+  
+  # Alignment as a list
+  my_alignments <- list(sequences1 = sequences1_align,
+                        sequences2 = sequences2_align,
+                        sequences3 = sequences3_align,
+                        sequences4 = sequences4_align,
+                        sequences5 = sequences5_align)
+  
+  # Format sequences
+  waterfall_df <- lapply(sequence_types, function(my_sequence_type,
+                                                  my_sequences,
+                                                  my_sequence_names) {
+    format_position(my_sequences[[my_sequence_type]],
+                    my_sequence_names,
+                    my_alignments[[my_sequence_type]]) %>%
+      dplyr::mutate(sequence_type = my_sequence_type) %>%
+      relocate(sequence_type)
+  },
+  my_sequences = my_sequences,
+  my_sequence_names = my_sequence_names)
+  
+  # rbind
+  waterfall_df <- rbindlist(waterfall_df) %>%
+    dplyr::mutate(sequence_type = fct_relevel(sequence_type, sequence_types)) %>%
+    dplyr::filter(!is.na(sequence))
+  
+  # Set levels
+  if (!is.null(colours)) {
+    waterfall_df <- waterfall_df %>%
+      dplyr::mutate(sequence = fct_relevel(sequence, names(dna_colours)))
+  }
+    
+  # Sequence rename vector
+  sequence_rename <- waterfall_df %>%
+    distinct(sequence_number, sequence_name)
+  sequence_rename <- setNames(step_labels(sequence_rename$sequence_name,
+                                          cutpoints = cutpoints, 
+                                          steps = steps), 
+                              sequence_rename$sequence_number)
+  
+  # Sequence type rename vector
+  sequence_type_rename = c("sequences1" = sequences1_name,
+                           "sequences2" = sequences2_name,
+                           "sequences3" = sequences3_name,
+                           "sequences4" = sequences4_name,
+                           "sequences5" = sequences5_name)
+  
+  # Count reads
+  read_count = sum(!is.na(sequences1))
+  
+  # Set base text size
+  if (is.null(base_text_size)) {
+    base_text_size <- 12
+  }
+  
+  # Plot
+  my_plot <-
+    ggplot(waterfall_df, aes(x = position, y = as.factor(sequence_number))) +
+    facet_grid(cols = vars(sequence_type), scales = "free", space = "free",
+               labeller = labeller(sequence_type = sequence_type_rename)) +
+    geom_tile(aes(fill = sequence)) +
+    { if (!is.null(colours)) {
+      scale_fill_manual(values = colours,
+                        labels = colour_labels)
+    }} +
+    { if (is.null(x_breaks)) {
+      scale_x_continuous(breaks = pretty_breaks(),
+                       guide = guide_axis(angle = 45))
+      }} +
+    { if (!is.null(x_breaks)) {
+      scale_x_continuous(breaks = pretty_breaks(n = x_breaks),
+                       guide = guide_axis(angle = 45))
+      }} +
+    scale_y_discrete(labels = sequence_rename) +
+    labs(x = "Position (bp)",
+         y = y_title,
+         fill = "Sequence") +
+    theme_minimal() +
+    { if (!is.null(border_read_limit) && read_count < border_read_limit) {
+      geom_segment(data = waterfall_df, aes(x = position - 0.5, xend = position + 0.5,
+                                            y = as.numeric(sequence_number) - 0.5, yend = as.numeric(sequence_number) - 0.5),  # Bottom border
+                   colour = "black", size = 0.1)
+    }} +
+    { if (!is.null(border_read_limit) && read_count < border_read_limit) {
+      geom_segment(data = waterfall_df, aes(x = position - 0.5, xend = position + 0.5,
+                                            y = as.numeric(sequence_number) + 0.5, yend = as.numeric(sequence_number) + 0.5),  # Top border
+                   colour = "black", size = 0.1)
+    }} +
+    theme(text = element_text(size = base_text_size),
+          axis.title = element_text(size = base_text_size),
+          axis.text.x = element_text(size = 0.7 * base_text_size),
+          axis.text.y = element_text(size = 0.7 * base_text_size),
+          legend.title = element_text(size = base_text_size),
+          legend.text = element_text(size = 0.7 * base_text_size),
+          strip.text = element_text(angle = 70, size = 0.7 * base_text_size),
+          strip.text.x = element_text(hjust = 0.7, margin = margin(t = 5, b = 5)))
+          # strip.background = element_blank())
+  
+  # Output
+  return(my_plot)
+  
+}
+
+```
+
+
+``` {r split_waterfall, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE, fig.height=10, fig.width=12}
+
+my_plots <- lapply(analysis_alignment_info, function(alignment_info,
+                                                     dna_colours,
+                                                     dna_labels,
+                                                     read_count_cutpoints,
+                                                     label_display_steps,
+                                                     base_text_size,
+                                                     repeat_recolour) {
+  # Exit if there are no sequences
+  if (nrow(alignment_info) == 0) {
+    return(NULL)
+  }
+  
+  # Repeat column
+  if (is.na(repeat_recolour)) {
+    repeat_column = "mid.2"
+  } else {
+    repeat_column = "mid.2_recoloured"
+  }
+  
+  # Plot
+  split_waterfall(sequences1 = alignment_info$left_end,
+                  sequences2 = alignment_info[[repeat_column]],
+                  # sequences3 = alignment_info$right_start,
+                  # sequences4 = NA,
+                  sequences3 = alignment_info$mid.3,
+                  sequences4 = alignment_info$right_window,
+                  sequences5 = NA,
+                  sequences1_name = "Left",
+                  sequences2_name = "Repeat",
+                  # sequences3_name = "Right",
+                  # sequences4_name = NULL,
+                  sequences3_name = "mid.3",
+                  sequences4_name = "Right",
+                  sequences5_name = NULL,
+                  sequences1_align = "right",
+                  sequences2_align = "left",
+                  sequences3_align = "left",
+                  sequences4_align = "left",
+                  sequences5_align = "left",
+                  sequence_names = alignment_info$mid.2_repeat_n,
+                  y_title = "Repeat length",
+                  length_sort_sequence = "sequences2",
+                  colours = dna_colours,
+                  colour_labels = dna_labels,
+                  cutpoints = read_count_cutpoints,
+                  steps = label_display_steps,
+                  x_breaks = 2,
+                  border_read_limit = 1000,
+                  base_text_size = base_text_size)
+},
+dna_colours = dna_colours,
+dna_labels = dna_labels,
+read_count_cutpoints = read_count_cutpoints,
+label_display_steps = label_display_steps,
+base_text_size = base_text_size,
+repeat_recolour = repeat_recolour)
+
+
+# Create directory
+my_path <- file.path(out_dir, "split_waterfall")
+if (!dir.exists(my_path)) {
+  dir.create(my_path)
+}
+
+# Display and export plots
+for (plot_name in names(my_plots)) {
+  my_plot <- my_plots[[plot_name]]
+  if(!is.null(my_plot)) {
+    my_plot <- my_plot + labs(title = plot_name)
+    print(my_plot)
+    for (plot_format in plot_formats) {
+      ggsave(filename = file.path(my_path, paste0(plot_name, ".split_waterfall", plot_format)),
+           plot = last_plot(),
+           height = 10, width = 12)
+    }
+  }
+}
+
+
+# temp <- analysis_alignment_info$`Mike_run1_6-97ng_7-119fmol_120324_adptSa-6`
+# temp$left_end
+# temp$mid.1
+
+# temp <- analysis_alignment_info$`C9Orf72_Skarens_Lab-C9orf_D08_GT23-11676` %>%
+#   dplyr::filter(nchar(mid.3) > 100)
+
+
+```
+
+
+# Cluster
+
+Group reads by repeat length. Below, a consensus sequence will be generated for each cluster to identify sequence variation within the repeat tract and flanking sequence.
+
+``` {r cluster_functions, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to determine the optimal number of clusters using the elbow method
+determine_optimal_clusters_elbow <- function(numbers, max_clusters = 10) {
+  
+  # Check if all numbers are identical
+  # If there are fewer than 3 unique values clustering is not meaningful
+  # if (length(unique(numbers)) == 1) {
+  if (length(unique(numbers)) < 3) {
+    return(1)
+  }
+  
+  # Ensure max_clusters does not exceed the number of unique data points
+  my_max_clusters <- min(max_clusters, length(unique(numbers)))
+ 
+  # Calculate the total within-cluster sum of squares for different number of clusters
+  wss <- numeric(my_max_clusters)
+  for (k in 1:my_max_clusters) {
+    set.seed(123)
+    wss[k] <- kmeans(numbers, centers = k)$tot.withinss
+  }
+  
+  # Find the elbow point by looking for the largest change in WSS
+  elbow_point <- which(diff(wss) == min(diff(wss))) + 1
+  
+  # Output
+  return(elbow_point)
+}
+
+
+# Function to determine the optimal number of clusters using the silhouette method
+determine_optimal_clusters_silhouette <- function(numbers, max_clusters = 10) {
+  
+  # Check if all numbers are identical
+  # If there are fewer than 3 unique values clustering is not meaningful
+  # if (length(unique(numbers)) == 1) {
+  if (length(unique(numbers)) < 3) {
+    return(1)
+  }
+  
+  # Ensure max_clusters does not exceed the number of unique data points
+  my_max_clusters <- min(max_clusters, length(unique(numbers)))
+ 
+  # Calculate silhouette score for different number of clusters
+  silhouette_scores <- numeric(my_max_clusters - 1)
+  for (k in 2:my_max_clusters) {
+    set.seed(123)
+    km <- kmeans(numbers, centers = k)
+    ss <- silhouette(km$cluster, dist(numbers))
+    silhouette_scores[k - 1] <- mean(ss[, 3])
+  }
+  
+  # Find the optimal number of clusters using the silhouette method
+  optimal_clusters <- which.max(silhouette_scores) + 1
+  
+  # Output
+  return(optimal_clusters)
+}
+
+
+# Function to assign numbers to clusters and renumber clusters by mean
+assign_clusters <- function(numbers, n_clusters = 2) {
+  
+  # Check if all numbers are identical or if there are fewer unique numbers than clusters
+  unique_numbers <- unique(numbers)
+  if (length(unique_numbers) == 1 || length(unique_numbers) <= n_clusters) {
+    return(setNames(rep(1, length(numbers)), numbers))
+  }
+  
+  # Ensure n_clusters does not exceed the number of unique data points
+  my_n_clusters <- min(n_clusters, length(unique_numbers))
+  
+  # Perform clustering
+  set.seed(123)
+  cluster_result <- kmeans(numbers, centers = my_n_clusters)
+  
+  # Create a data frame with numbers and their cluster assignments
+  cluster_df <- data.frame(number = numbers, 
+                           cluster = cluster_result$cluster)
+  
+  # Calculate the mean of the numbers in each cluster
+  cluster_means <- cluster_df %>%
+    group_by(cluster) %>%
+    dplyr::summarise(mean_value = mean(number, na.rm = TRUE)) %>%
+    ungroup() %>%
+    arrange(mean_value) %>%
+    dplyr::mutate(new_cluster = row_number())
+  
+  # Reassign clusters based on the ordered means
+  cluster_df <- cluster_df %>%
+    left_join(cluster_means, by = "cluster") %>%
+    dplyr::mutate(cluster = new_cluster) %>%
+    dplyr::select(-new_cluster, -mean_value)
+  
+  # Return a named vector with renumbered clusters
+  return(setNames(cluster_df$cluster, cluster_df$number))
+}
+
+
+# Function to unify optimal cluster determination and cluster assignment
+cluster <- function(numbers, max_clusters = 10, optimal_cluster_method = "silhouette") {
+  
+  # Determine optimal cluster number if more than one cluster is required
+  if (max_clusters > 1) {
+  
+    # Determine optimal number of clusters
+    optimal_elbow <- 
+      determine_optimal_clusters_elbow(numbers = numbers,
+                                       max_clusters = max_clusters)
+    optimal_silhouette <- 
+      determine_optimal_clusters_silhouette(numbers = numbers,
+      max_clusters = max_clusters)
+  
+    # Determine optimal cluster number
+    if (optimal_cluster_method == "silhouette") {
+      optimal_clusters <- optimal_silhouette
+    } else if (optimal_cluster_method == "elbow") {
+      optimal_clusters <- optimal_elbow
+    }
+    
+  } else {
+    optimal_elbow <- NA
+    optimal_silhouette <- NA
+    optimal_clusters <- max_clusters
+  }
+  
+  # Cluster
+  my_clusters <- assign_clusters(numbers = numbers, 
+                                 n_clusters = optimal_clusters)
+  
+  # Output
+  return(list(clusters = my_clusters,
+              optimal_elbow = optimal_elbow,
+              optimal_silhouette = optimal_silhouette))
+}
+
+```
+
+
+``` {r cluster, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+cluster_alignment_info <- lapply(analysis_alignment_info, function(alignment_info,
+                                                                   split_clustering_threshold,
+                                                                   max_clusters,
+                                                                   optimal_cluster_method) {
+  
+  # Remove reads without repeat numbers
+  alignment_info <- alignment_info %>%
+    dplyr::filter(!is.na(mid.2_repeat_n))
+  
+  # Create cluster groups
+  alignment_info <- alignment_info %>%
+    dplyr::mutate(cluster_group = case_when(is.na(split_clustering_threshold) ~ "A",
+                                            mid.2_repeat_n < split_clustering_threshold ~ "A",
+                                            mid.2_repeat_n >= split_clustering_threshold ~ "B",
+                                            TRUE ~ NA)) %>%
+    relocate(cluster_group, .after = "mid.2_repeat_n")
+  
+  # Separate cluster groups into a list
+  cluster_groups <- alignment_info %>%
+    split(f = as.factor(.$cluster_group))
+  
+  # Cluster each group
+  cluster_results <- lapply(cluster_groups, function(cluster_group,
+                                                     max_clusters,
+                                                     optimal_cluster_method) {
+    # Cluster
+    cluster_result <- cluster(numbers = cluster_group$mid.2_repeat_n,
+                              max_clusters = max_clusters,
+                              optimal_cluster_method = optimal_cluster_method)
+    
+    # Add cluster result to original data
+    cluster_group$optimal_elbow <- cluster_result$optimal_elbow
+    cluster_group$optimal_silhouette <- cluster_result$optimal_silhouette
+    cluster_group$cluster_number <- unname(cluster_result$clusters)
+    cluster_group <- cluster_group %>%
+      relocate(c(optimal_elbow, optimal_silhouette, cluster_number), .after = "cluster_group")
+    
+    # Output
+    return(cluster_group)
+    
+  },
+  max_clusters = max_clusters,
+  optimal_cluster_method = optimal_cluster_method)
+  
+  # rbind
+  cluster_results <- rbindlist(cluster_results) %>%
+    dplyr::mutate(cluster_name = paste0(cluster_group, cluster_number)) %>%
+    relocate(cluster_name, .after = "cluster_number")
+  
+  # Add cluster results to the original alignment info, to maintain order
+  alignment_info <- alignment_info %>%
+    left_join(cluster_results %>%
+                dplyr::select(qname, optimal_elbow, optimal_silhouette, cluster_number, cluster_name),
+              by = join_by(qname)) %>%
+    relocate(c(cluster_group, optimal_elbow, optimal_silhouette, cluster_number, cluster_name), 
+             .after = "mid.2_repeat_n")
+  
+  # Output
+  return(alignment_info)
+    
+},
+split_clustering_threshold = split_clustering_threshold,
+max_clusters = max_clusters,
+optimal_cluster_method = optimal_cluster_method)
+
+```
+
+
+``` {r cluster_repeat_summary, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Summarise repeat length of clusters
+cluster_summary <- rbindlist(cluster_alignment_info) %>%
+  group_by(file_stem, cluster_name) %>%
+    dplyr::summarise(mean_repeat_n = mean(mid.2_repeat_n, na.rm = TRUE),
+                     read_count = sum(!is.na(mid.2_repeat_n)),
+                     sd_repeat_n = sd(mid.2_repeat_n, na.rm = TRUE),
+                     sem_repeat_n = sd(mid.2_repeat_n, na.rm = TRUE) / sqrt(read_count)) %>%
+    ungroup()
+
+```
+
+
+``` {r plot_cluster_repeats, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE, fig.height=8, fig.width=12}
+
+# Plot
+rbindlist(cluster_alignment_info) %>%
+  ggplot(aes(x = file_stem, y = mid.2_repeat_n)) +
+  geom_violin(trim = TRUE, scale = "width") +
+  # geom_jitter(aes(fill = as.factor(cluster_name)),
+  #             height = 0, width = 0.25, size = 2, shape = 21, colour = "black", alpha = 0.4) +
+  geom_jitter(aes(colour = as.factor(cluster_name)),
+              height = 0, width = 0.25, size = point_size, alpha = point_alpha) +
+  stat_summary(fun = mean, geom = "point", 
+               aes(fill = as.factor(cluster_name)),
+               shape = 23, show.legend = FALSE, colour = "black", 
+               size = 3) +
+  stat_summary(fun = mean, geom = "text", 
+               aes(label = round(..y.., 1), 
+                   group = interaction(file_stem, cluster_name)
+                   # colour = as.factor(cluster_name)
+                   ),
+               # position = position_nudge(x = 0.4), 
+               vjust = -0.3, hjust = -0.3, angle = 45,
+               size = 3, show.legend = FALSE, colour = "black") +
+  { if (!is.na(split_clustering_threshold)) {
+    geom_hline(yintercept = split_clustering_threshold,
+               linetype = "dashed", colour = "red")
+  }} +
+  # scale_x_discrete(labels = function(x) str_wrap(x, width = 50),
+  #                  guide = guide_axis(angle = 70)) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                 guide = guide_axis(angle = 70)) +
+  scale_y_continuous(breaks = pretty_breaks(n = 10)) +
+  labs(x = "File stem",
+       y = "Repeat length",
+       colour = "Cluster") +
+  theme_minimal() +
+  theme(text = element_text(size = base_text_size),
+        axis.text.x = element_text(size = 0.5 * base_text_size),
+        axis.text.y = element_text(size = 0.7 * base_text_size))
+
+# Create directory
+my_path <- file.path(out_dir, "cluster")
+if (!dir.exists(my_path)) {
+  dir.create(my_path)
+}
+
+# Export plot
+for (plot_format in plot_formats) {
+  ggsave(filename = file.path(my_path, paste0("cluster", plot_format)),
+         plot = last_plot(),
+         height = 8, width = 10)
+}
+
+```
+
+
+``` {r table_cluster_repeats, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE, fig.height=8, fig.width=10}
+
+# Display table
+kbl(cluster_summary, caption = "Cluster repeat lengths") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                font_size = 8)
+
+# Export table
+write_excel_function(named_list = list("cluster_summary" = cluster_summary),
+                     path = file.path(my_path, "cluster.xlsx"),
+                     overwrite_sheet = TRUE)
+
+```
+
+
+``` {r export_alignment_info, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Summarise repeat length of clusters
+cluster_alignment_info_join <- rbindlist(cluster_alignment_info)
+
+# Create directory
+my_path <- file.path(out_dir, "alignment")
+if (!dir.exists(my_path)) {
+  dir.create(my_path)
+}
+
+# Export table
+write.csv(cluster_alignment_info_join,
+          file = file.path(my_path, "alignment.csv"),
+          row.names = FALSE)
+
+```
+
+
+# Focus region
+
+Examine a user-specified focus region, summarising the sequence, calculating sequence frequency and generating a consensus sequence for each cluster.
+
+``` {r summarise_focus_sequence, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Optionally summarise a focus sequence (column name selected by user)
+if (!is.na(focus_column)) {
+  
+  # Reload if previously run
+  my_path <- file.path(out_dir, "temp", "focus_alignment_info.RData")
+  if (file.exists(my_path)) {
+    load(my_path)
+  } else {
+    focus_alignment_info <- pblapply(cluster_alignment_info, column_process,
+                                     sequence_column = focus_column,
+                                     action = "summarise",
+                                     recipient_column = NULL,
+                                     min_repeat_length = sumseq_min_repeat_length,
+                                     max_repeat_length = sumseq_max_repeat_length,
+                                     exclude_repeat_lengths = sumseq_exclude_repeat_lengths,
+                                     prefer_short_or_long = sumseq_prefer_short_or_long)
+    save(focus_alignment_info, file = my_path)
+  }
+  
+} else {
+  focus_alignment_info <- cluster_alignment_info
+}
+
+```
+
+
+## Frequency
+
+``` {r calculate_focus_sequence_frequency, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Calculate frequency of sequences in a selected region
+if (!is.na(focus_column)) {
+  
+  # Total reads
+  total_reads <- rbindlist(focus_alignment_info) %>%
+    group_by(file_stem, cluster_name) %>%
+    dplyr::summarise(total_reads = n()) %>%
+    ungroup()
+  
+  # Calculate sequence frequency as a proportion of all reads
+  focus_sequence_proportion <- rbindlist(focus_alignment_info) %>%
+    group_by(file_stem, cluster_name, !!sym(paste0(focus_column, "_summary"))) %>%
+    dplyr::summarise(count = n()) %>%
+    ungroup() %>%
+    left_join(total_reads, by = join_by(file_stem, cluster_name)) %>%
+    dplyr::mutate(proportion = count / total_reads)
+  
+  # Group reads with frequencies under the threshold into 'Other'
+  focus_sequence_proportion_simple <- focus_sequence_proportion %>%
+    dplyr::mutate(!!sym(paste0(focus_column, "_summary")) := ifelse(proportion > focus_proportion_threshold,
+                                            !!sym(paste0(focus_column, "_summary")),
+                                            "Other")) %>%
+    group_by(file_stem, cluster_name, !!sym(paste0(focus_column, "_summary"))) %>%
+    dplyr::summarise(count = sum(count)) %>%
+    ungroup() %>%
+    left_join(total_reads, by = join_by(file_stem, cluster_name)) %>%
+    dplyr::mutate(proportion = count / total_reads)
+  
+}
+
+```
+
+
+``` {r plot_focus_sequence_frequency, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, fig.height=10, fig.width=15}
+
+# Plot focus sequence frequency
+if (!is.na(focus_column)) {
+  
+  # Levels
+  focus_sequence_proportion_simple <- focus_sequence_proportion_simple %>%
+    dplyr::mutate(cluster_name = fct_relevel(cluster_name,
+                                             sort(unique(cluster_name), decreasing = TRUE)))
+
+  # Plot
+  my_plot <-
+    ggplot(focus_sequence_proportion_simple, aes(x = file_stem, y = proportion)) +
+    facet_grid(rows = vars(cluster_name)) +
+    geom_bar(aes(fill = !!sym(paste0(focus_column, "_summary"))),
+             stat = "identity", position = "stack", colour = "black") +
+    geom_text(aes(label = round(proportion, 2), group = !!sym(paste0(focus_column, "_summary"))),
+              position = position_stack(vjust = 0.5), size = 3) +
+    scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                     guide = guide_axis(angle = 70)) +
+    scale_y_continuous(breaks = pretty_breaks(n = 2)) +
+    scale_fill_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50)) +
+    labs(title = focus_column,
+         x = "File stem",
+         y = "Proportion of reads",
+         fill = "Sequence") +
+    theme_bw() +
+    theme(text = element_text(size = base_text_size),
+          axis.text.x = element_text(size = 0.5 * base_text_size),
+          axis.text.y = element_text(size = 0.5 * base_text_size),
+          legend.text = element_text(size = 0.5 * base_text_size))
+  
+  # Display
+  print(my_plot)
+  
+  # Create directory
+  my_path <- file.path(out_dir, "focus")
+  if (!dir.exists(my_path)) {
+    dir.create(my_path)
+  }
+  
+  # Export plot
+  for (plot_format in plot_formats) {
+    ggsave(filename = file.path(my_path, paste0("focus_region_proportion", plot_format)),
+           plot = my_plot,
+           height = 10, width = 15)
+  }
+  
+}
+  
+```
+
+
+``` {r table_focus_sequence_frequency, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, fig.height=10, fig.width=15}
+
+# Export table of focus sequence frequency
+if (!is.na(focus_column)) {
+  write_excel_function(named_list = list("focus_sequence_proportion" = focus_sequence_proportion),
+                       path = file.path(my_path, "focus.xlsx"),
+                       overwrite_sheet = TRUE)
+}
+
+```
+
+
+## Consensus
+
+``` {r focus_sequence_consensus, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, results='hide'}
+  
+# Optionally summarise the consensus for the focus region
+if (!is.na(focus_column)) {
+  
+  # Reload if previously run
+  my_path <- file.path(out_dir, "temp", "cluster_focus_consensus_summary.RData")
+  if (file.exists(my_path)) {
+    load(my_path)
+  } else {
+    
+    # Summarise user-selected sequence column
+    cluster_focus_consensus_summary <- lapply(file_stem_vector, function(file_stem,
+                                                                         cluster_alignment_info,
+                                                                         msa_random_sample,
+                                                                         focus_column) {
+      
+      # Extract alignment info
+      alignment_info <- cluster_alignment_info[[file_stem]]
+      
+      # Separate cluster groups into a list
+      cluster_groups <- alignment_info %>%
+        split(f = as.factor(.$cluster_name))
+      
+      # Vector of cluster group names
+      cluster_group_names <- setNames(names(cluster_groups), names(cluster_groups))
+      
+      # Generate consensus sequence for the selected column and summarise
+      cluster_consensus_summary <- lapply(cluster_group_names, function(cluster_group_name,
+                                                                        msa_random_sample,
+                                                                        focus_column,
+                                                                        file_stem) {
+        
+        # Extract cluster group
+        cluster_group <- cluster_groups[[cluster_group_name]]
+        
+        # Optionally select a random sample of reads to limit processing
+        if (!is.na(msa_random_sample)) {
+          cluster_group <- cluster_group %>%
+            slice_sample(n = msa_random_sample)
+        }
+        
+        # Convert valid sequences to a DNA stringset
+        dna_stringset <- DNAStringSet(na.omit(setNames(cluster_group[[focus_column]], 
+                                                       cluster_group$qname)))
+        
+        # Read count
+        read_count <- length(dna_stringset)
+        
+        # Generate consensus sequence if there is more than one sequence
+        if (read_count > 1) {
+          alignment <- msa(dna_stringset)
+          consensus <- msaConsensusSequence(alignment)
+        } else if (read_count == 1) {
+          consensus <- as.character(dna_stringset[[1]])
+        } else {
+          consensus <- NA
+        }
+        
+        # Clean consensus sequence
+        consensus_clean <- gsub("-", "", consensus)
+          
+        # Summarise consensus
+        consensus_summary <- summarise_sequence(consensus_clean,
+                                                min_repeat_length = sumseq_min_repeat_length,
+                                                max_repeat_length = sumseq_max_repeat_length,
+                                                exclude_repeat_lengths = sumseq_exclude_repeat_lengths)
+          
+        # Data frame
+        cluster_group_summary <- data.frame(file_stem = file_stem,
+                                            cluster_name = cluster_group_name,
+                                            read_count = read_count) %>%
+          dplyr::mutate(!!sym(paste0(focus_column, "_consensus")) := consensus,
+                        !!sym(paste0(focus_column, "_consensus_clean")) := consensus_clean,
+                        !!sym(paste0(focus_column, "_consensus_summary")) := consensus_summary)
+        
+        # Output
+        return(cluster_group_summary)
+        
+      },
+      msa_random_sample = msa_random_sample,
+      focus_column = focus_column,
+      file_stem = file_stem)
+      
+      # Rbind
+      cluster_consensus_summary <- rbindlist(cluster_consensus_summary)
+      
+      # Output
+      return(cluster_consensus_summary)
+      
+    },
+    cluster_alignment_info = cluster_alignment_info,
+    msa_random_sample = msa_random_sample,
+    focus_column = focus_column)
+  
+    # Rbind
+    cluster_focus_consensus_summary <- rbindlist(cluster_focus_consensus_summary)
+    
+    # Save
+    save(cluster_focus_consensus_summary, file = my_path)
+  }
+  
+}
+
+```
+
+
+``` {r plot_focus_sequence_consensus, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+
+if (!is.na(focus_column)) {
+  
+  # Levels
+  cluster_focus_consensus_summary <- cluster_focus_consensus_summary %>%
+    dplyr::mutate(cluster_name = fct_relevel(cluster_name,
+                                             sort(unique(cluster_name), decreasing = FALSE)))
+  
+  # Plot
+  my_plot <-
+    ggplot(cluster_focus_consensus_summary, aes(x = file_stem, y = cluster_name)) +
+    geom_point(aes(size = read_count, colour = !!sym(paste0(focus_column, "_consensus_summary")))) +
+    scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                     guide = guide_axis(angle = 70)) +
+    scale_colour_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50)) +
+    scale_size_continuous(range = c(1, 4)) +
+    labs(title = focus_column,
+         x = "File stem",
+         y = "Cluster",
+         colour = "Focus sequence",
+         size = "Read count") +
+    theme_minimal() +
+    theme(text = element_text(size = base_text_size),
+          axis.text.x = element_text(size = 0.5 * base_text_size),
+          axis.text.y = element_text(size = 0.5 * base_text_size),
+          legend.text = element_text(size = 0.5 * base_text_size))
+  
+  # Display
+  print(my_plot)
+  
+  # Export plot
+  my_path <- file.path(out_dir, "focus")
+  for (plot_format in plot_formats) {
+    ggsave(filename = file.path(my_path, paste0("focus_region_consensus", plot_format)),
+           plot = my_plot,
+           height = 6, width = 12)
+  }
+   
+}
+
+```
+
+
+``` {r table_focus_sequence_consensus, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+if (!is.na(focus_column)) {
+  
+  # Display table
+  print(kbl(cluster_focus_consensus_summary, caption = "Focus region consensus") %>%
+          kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                        font_size = 8))
+  
+  # Export table
+  my_path <- file.path(out_dir, "focus")
+  write_excel_function(named_list = list("cluster_focus_consensus_summary" = cluster_focus_consensus_summary),
+                       path = file.path(my_path, "focus.xlsx"),
+                       overwrite_sheet = TRUE)
+  
+}
+
+```
+
+
+# Consensus sequence
+
+Generate consensus sequences for each cluster, focusing on different regions around the repeat. The full *window* includes the left flank, repeat region, and right flank, extending up to the length of the specified analysis window on either side. The left flank (*window_left*) spans twice the analysis window size, centered on the start of the repeat. Similarly, the right flank (*window_right*) covers twice the analysis window size, centered on the end of the repeat.
+
+``` {r msa_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to align sequences using msa
+multiple_sequence_alignment <- function(named_sequences, sequence_type) {
+  
+  # Replace NA or empty sequences with a placeholder
+  placeholder <- "-"
+  named_sequences[is.na(named_sequences) | named_sequences == ""] <- placeholder
+  
+  # Convert sequences to appropriate Biostrings object
+  if (sequence_type == "DNA") {
+    sequence_stringset <- DNAStringSet(named_sequences)
+  } else if (sequence_type == "protein") {
+    sequence_stringset <- AAStringSet(named_sequences)
+  } else {
+    stop("Invalid sequence type: should be either 'DNA' or 'protein'")
+  }
+  
+  # Check if there are no sequences
+  if (length(sequence_stringset) == 0) {
+    warning("No sequences provided for alignment.")
+    return(NULL)
+  }
+  
+  # Check if there's only one sequence
+  if (length(sequence_stringset) == 1) {
+    warning("Only one sequence provided. Alignment is not meaningful.")
+    return(NULL)
+  }
+  
+  # Perform multiple sequence alignment
+  alignment <- msa(sequence_stringset)
+  
+  # Output
+  return(alignment)
+}
+
+```
+
+
+``` {r calculate_msa_score_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to calculate alignment scores
+calculate_msa_scores <- function(alignment) {
+  
+  # Check if alignment is NULL
+  if (is.null(alignment)) {
+    warning("No alignment to score.")
+    return(NULL)
+  }
+  
+  # Generate consensus
+  alignment_matrix <- as.matrix(alignment)
+  consensus <- msaConsensusSequence(alignment)
+  
+  # Compute the alignment scores
+  scores <- apply(alignment_matrix, 1, function(seq_row) {
+    # Concatenate the row into a single string
+    sequence <- paste(seq_row, collapse = "")
+    # Perform the pairwise alignment
+    pairwiseAlignment(sequence, consensus, scoreOnly = TRUE)
+  })
+  
+  # Output
+  return(scores)
+}
+
+```
+
+
+``` {r find_msa_outliers_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to identify outliers based on alignment scores
+find_msa_outliers <- function(scores, threshold = 2) {
+  
+  # Check if scores are NULL
+  if (is.null(scores)) {
+    warning("No scores provided for outlier detection.")
+    return(list(mean_score = NA,
+                sd_score = NA,
+                threshold_score = NA,
+                outliers = logical(0)))
+  }
+  
+  # Calculate
+  mean_score <- mean(scores)
+  sd_score <- sd(scores)
+  threshold_score <- mean_score - (threshold * sd_score)
+  outliers <- scores < threshold_score
+  return(list(mean_score = mean_score,
+              sd_score = sd_score,
+              threshold_score = threshold_score,
+              outliers = outliers))
+}
+
+```
+
+
+``` {r msa_and_score_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to perform msa and score
+msa_and_score <- function(named_sequences, sequence_type, msa_outlier_threshold) {
+  
+  # Align
+  msa_result <- multiple_sequence_alignment(named_sequences = named_sequences,
+                                            sequence_type = sequence_type)
+  
+  # Exit if alignment failed
+  if (is.null(msa_result)) {
+    return(NULL)
+  }
+  
+  # Find sequences with poor alignment
+  alignment_scores <- calculate_msa_scores(msa_result)
+  
+  # Exit if no alignment scores could be calculated
+  if (is.null(alignment_scores)) {
+    return(NULL)
+  }
+  
+  # Put alignment scores in the original read order
+  alignment_scores <- alignment_scores[names(named_sequences)]
+  alignment_outliers_result <- find_msa_outliers(alignment_scores,
+                                                 threshold = msa_outlier_threshold)
+  alignment_outliers <- alignment_outliers_result$outliers
+  alignment_outliers <- alignment_outliers[names(named_sequences)]
+
+  # Table of msa results
+  msa_scores <- data.frame(read_name = names(alignment_scores),
+                           alignment_score = unname(alignment_scores))
+  msa_outliers <- data.frame(read_name = names(alignment_outliers),
+                             outlier = unname(alignment_outliers))
+  msa_table <- as.data.frame(as.matrix(msa_result)) %>%
+    tibble::rownames_to_column("read_name") %>%
+    dplyr::mutate(read_name = fct_relevel(read_name, names(named_sequences))) %>%
+    arrange(read_name) %>%
+    left_join(msa_scores, by = join_by(read_name)) %>%
+    left_join(msa_outliers, by = join_by(read_name)) %>%
+    relocate(c(alignment_score, outlier), .after = "read_name")
+  
+  # Output
+  return(list(msa_result = msa_result,
+              msa_table = msa_table))
+}
+
+```
+
+
+``` {r msa_to_consensus_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+msa_to_consensus <- function(named_sequences, sequence_type, msa_outlier_threshold, remove_msa_outliers) {
+  
+  # Exit if there is just one sequence
+  if (length(named_sequences) == 1) {
+    
+    # Construct msa table and insert into an msa dataset
+    spread_sequence <- strsplit(named_sequences[[1]], "")[[1]]
+    spread_sequence <- t(as.data.frame(spread_sequence))
+    rownames(spread_sequence) <- NULL
+    msa_table <- data.frame(read_name = names(named_sequences)[[1]],
+                       alignment_score = NA,
+                       outlier = NA,
+                       spread_sequence)
+    colnames(msa_table)[4:ncol(msa_table)] <- paste0("V", 1:(ncol(msa_table) - 3))
+    msa_dataset <- list(msa_result = NULL,
+                        msa_table = msa_table)
+    
+    # Make consensus sequence
+    consensus = as.character(named_sequences)
+    consensus_clean <- gsub("-", "", consensus)
+    
+    # Output
+    return(list(msa_dataset = msa_dataset,
+                consensus = consensus,
+                consensus_clean = consensus_clean))
+  }
+  
+  # Generate msa dataset
+  msa_dataset <- msa_and_score(named_sequences = named_sequences,
+                               sequence_type = sequence_type,
+                               msa_outlier_threshold = msa_outlier_threshold)
+  
+  # Exit if msa failed
+  if (is.null(msa_dataset)) {
+    return(list(msa_data = NULL,
+                msa_data_filtered = NULL,
+                consensus = NULL,
+                consensus_clean = NULL))
+  }
+  
+  # Vector of msa outliers
+  msa_outliers <- msa_dataset$msa_table %>%
+    dplyr::filter(outlier)
+  
+  # Optionally remove msa outliers and repeat msa
+  if (remove_msa_outliers) {
+    
+    # Filter sequences to remove msa outliers
+    named_sequences_filtered <- named_sequences[!names(named_sequences) %in% msa_outliers$read_name]
+    
+    # Generate filtered msa dataset with outliers removed
+    msa_dataset_filtered <- msa_and_score(named_sequences = named_sequences_filtered,
+                                          sequence_type = sequence_type,
+                                          msa_outlier_threshold = msa_outlier_threshold)
+  }
+  
+  # Generate consensus sequence
+  if (remove_msa_outliers && !is.null(msa_dataset_filtered)) {
+    msa_result <- msa_dataset_filtered$msa_result
+  } else {
+    msa_result <- msa_dataset$msa_result
+  }
+  consensus <- msaConsensusSequence(msa_result)
+  consensus_clean <- gsub("-", "", consensus)
+  
+  # Output
+  if (remove_msa_outliers) {
+    return(list(msa_dataset = msa_dataset,
+                msa_dataset_filtered = msa_dataset_filtered,
+                consensus = consensus,
+                consensus_clean = consensus_clean))
+  } else {
+    return(list(msa_dataset = msa_dataset,
+                consensus = consensus,
+                consensus_clean = consensus_clean))
+  }
+}
+
+```
+
+
+``` {r consensus, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, results='hide'}
+
+# Reload if already run
+my_path <- file.path(out_dir, "temp", "consensus_results.RData")
+if (file.exists(my_path)) {
+  load(my_path)
+} else {
+
+  # Generate consensus sequences
+  consensus_results <- pblapply(cluster_alignment_info, function(alignment_info,
+                                                                 msa_outlier_threshold,
+                                                                 remove_msa_outliers,
+                                                                 msa_random_sample,
+                                                                 consensus_full_sequence) {
+    
+    # Separate cluster groups into a list
+    cluster_groups <- alignment_info %>%
+      split(f = as.factor(.$cluster_name))
+    
+    # Generate consensus sequences for each cluster
+    cluster_results <- lapply(cluster_groups, function(cluster_group,
+                                                       msa_outlier_threshold,
+                                                       remove_msa_outliers,
+                                                       msa_random_sample,
+                                                       consensus_full_sequence) {
+      
+      # Optionally select a random sample of reads to limit processing
+      if (!is.na(msa_random_sample)) {
+        cluster_group <- cluster_group %>%
+          slice_sample(n = msa_random_sample)
+      }
+      
+      # List of named sequences to use for consensus generation
+      if (consensus_full_sequence) {
+        named_sequence_list <- list("full" = setNames(cluster_group$query_sequence,
+                                                      cluster_group$qname),
+                                    "window" = setNames(cluster_group$`left_end-rpt-right_start`,
+                                                                 cluster_group$qname),
+                                    "window_left" = setNames(cluster_group$`left_end-rpt_start`,
+                                                      cluster_group$qname),
+                                    "window_right" = setNames(cluster_group$`rpt_end-right_start`,
+                                                       cluster_group$qname))
+      } else {
+        named_sequence_list <- list("window" = setNames(cluster_group$`left_end-rpt-right_start`,
+                                                                 cluster_group$qname),
+                                    "window_left" = setNames(cluster_group$`left_end-rpt_start`,
+                                                      cluster_group$qname),
+                                    "window_right" = setNames(cluster_group$`rpt_end-right_start`,
+                                                       cluster_group$qname))
+      }
+      
+      # Generate consensus sequences
+      consensus_dataset <- lapply(named_sequence_list,
+                                  msa_to_consensus,
+                                  sequence_type = "DNA",
+                                  msa_outlier_threshold = msa_outlier_threshold,
+                                  remove_msa_outliers = remove_msa_outliers)
+      
+      # Output
+      return(consensus_dataset)
+      
+    },
+    msa_outlier_threshold = msa_outlier_threshold,
+    remove_msa_outliers = remove_msa_outliers,
+    msa_random_sample = msa_random_sample,
+    consensus_full_sequence = consensus_full_sequence)
+    
+    # Output
+    return(cluster_results)
+    
+  },
+  msa_outlier_threshold = msa_outlier_threshold,
+  remove_msa_outliers = remove_msa_outliers,
+  msa_random_sample = msa_random_sample,
+  consensus_full_sequence = consensus_full_sequence)
+
+  # Save  
+  save(consensus_results, file = my_path)
+ 
+}
+
+```
+
+
+## Plot consensus
+
+``` {r plot_consensus_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to plot a sequence wrapped
+sequence_wrap_plot <- function(sequence, wrap_width, sequence_colours, sequence_colour_labels,
+                               base_text_size) {
+  
+  # Function to convert a sequence into a long data frame with positions
+  sequence_to_long_df <- function(sequence) {
+    data.frame(position = 1:nchar(sequence),
+               sequence = unlist(strsplit(sequence, "")))
+  }
+  
+  # Long format
+  sequence_df <- sequence_to_long_df(sequence) %>%
+    dplyr::mutate(row = (position - 1) %/% wrap_width + 1,
+                  col = (position - 1) %% wrap_width + 1)
+  
+  # Row rename vector
+  row_rename <- unique(sequence_df$row)
+  row_rename <- setNames(((row_rename - 1) * wrap_width) + 1, row_rename)
+  
+  # Plot
+  my_plot <-
+    ggplot(sequence_df, aes(x = col, y = row)) +
+    geom_tile(aes(fill = sequence), 
+              width = 1, height = 1,
+              colour = "black", alpha = 0.75) +
+    geom_text(aes(label = sequence), size = 3) +
+    scale_fill_manual(values = sequence_colours,
+                      labels = sequence_colour_labels) +
+    scale_x_continuous(breaks = pretty_breaks(n = 10)) +
+    # scale_y_reverse() +
+    scale_y_reverse(breaks = seq(min(sequence_df$row), max(sequence_df$row), by = 1),
+                    labels = row_rename) +
+    labs(x = "Position (bp)") +
+    coord_fixed(ratio = 1) +
+    theme_minimal() +
+    theme(legend.position = "none",
+          # axis.text.y = element_blank(),
+          axis.title.y = element_blank(),
+          # axis.text.y = element_text(size = 16),
+          # axis.ticks.y = element_blank(),
+          text = element_text(size = base_text_size),
+          axis.title.x = element_text(size = base_text_size),
+          # axis.title.y = element_text(size = 14),
+          axis.text.x = element_text(size = base_text_size),
+          legend.title = element_text(size = base_text_size),
+          legend.text = element_text(size = 0.5 * base_text_size))
+  
+  # Output
+  return(my_plot)
+}
+
+```
+
+
+``` {r plot_consensus, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE, fig.height=10, fig.width=15}
+
+# Extract consensus sequences
+consensus_clean <- lapply(consensus_results, function(filestem_consensus_results) {
+  lapply(filestem_consensus_results, function(cluster_consensus_results) {
+    lapply(cluster_consensus_results, "[[", "consensus_clean")
+  })
+})
+consensus_clean_flat <- unlist(consensus_clean)
+
+# Plot consensus sequences
+my_plots <- lapply(consensus_clean_flat,
+                   sequence_wrap_plot,
+                   wrap_width = 50,
+                   sequence_colours = dna_colours,
+                   sequence_colour_labels = dna_labels,
+                   base_text_size = 18)
+
+# Display plots
+for (plot_name in names(my_plots)) {
+  my_plot <- my_plots[[plot_name]]
+  if(!is.null(my_plot)) {
+    my_plot <- my_plot + labs(title = plot_name)
+    print(my_plot)
+  }
+}
+
+```
+
+
+``` {r write_fasta_function, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Function to export sequences as a fasta
+write_fasta <- function(named_sequences, sequence_type, output_path) {
+  
+  # Replace NA or empty sequences with a placeholder
+  placeholder <- "-"
+  named_sequences[is.na(named_sequences) | named_sequences == ""] <- placeholder
+  
+  # Clean sequences to remove invalid characters
+  if (sequence_type == "DNA") {
+    named_sequences <- gsub("[^ACGTN\\-]", "-", named_sequences)
+    sequence_stringset <- DNAStringSet(named_sequences)
+  } else if (sequence_type == "protein") {
+    named_sequences <- gsub("[^ACDEFGHIKLMNPQRSTVWY\\-]", "-", named_sequences)
+    sequence_stringset <- AAStringSet(named_sequences)
+  } else {
+    stop("Invalid sequence type: should be either 'DNA' or 'protein'")
+  }
+  
+  # Export fasta
+  writeXStringSet(sequence_stringset, 
+                  filepath = output_path, 
+                  format = "fasta")
+}
+
+```
+
+
+``` {r export_consensus_fasta, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Create directory
+my_path <- file.path(out_dir, "consensus")
+if (!dir.exists(my_path)) {
+  dir.create(my_path)
+}
+
+# Export consensus sequences
+for (file_stem in names(consensus_clean)) {
+  my_sequences <- unlist(consensus_clean[[file_stem]])
+  names(my_sequences) <- paste(file_stem, names(my_sequences), sep = ".")
+  write_fasta(named_sequences = my_sequences,
+              sequence_type = "DNA",
+              output_path = file.path(my_path, paste0(file_stem, ".consensus.fasta")))
+}
+
+```
+
+
+``` {r extract_msa_tables, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Extract alignment scores and outliers from the original msa tables, rather than the filtered results
+msa_tables <- lapply(setNames(names(consensus_results), names(consensus_results)), function(file_stem) {
+  
+  filestem_consensus_results <- consensus_results[[file_stem]]
+  
+  lapply(setNames(names(filestem_consensus_results), names(filestem_consensus_results)), function(cluster_name) {
+    
+    cluster_consensus_results <- filestem_consensus_results[[cluster_name]]
+    
+    lapply(setNames(names(cluster_consensus_results), names(cluster_consensus_results)), function(sequence_type) {
+      
+      # Extract consensus results
+      sequence_type_consensus_results <- cluster_consensus_results[[sequence_type]]
+      
+      # Extract msa table
+      msa_table <- sequence_type_consensus_results$msa_dataset$msa_table
+      
+      # Exit if the msa table is null
+      if (is.null(msa_table)) {
+        return(NULL)
+      }
+      
+      # Add file_stem, cluster_name, and sequence_type columns to the msa_table
+      msa_table <- msa_table %>%
+        dplyr::mutate(file_stem = file_stem,
+                      cluster_name = cluster_name,
+                      sequence_type = sequence_type) %>%
+        relocate(file_stem, cluster_name, sequence_type)
+      
+      # Output
+      return(msa_table)
+      
+    }) # End of sequence_type level
+    
+  }) # End of cluster_name level
+  
+}) # End of file_stem level
+
+```
+
+
+## Multiple sequence alignment summary
+
+``` {r summarise_msa_metrics, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE}
+
+# Flatten msa tables
+flat_msa_tables <- unlist(unlist(msa_tables, recursive = FALSE), recursive = FALSE)
+
+# Remove sequence columns
+flat_msa_tables <- lapply(flat_msa_tables, function(msa_table) {
+  if (is.null(msa_table)) {
+    return(NULL)
+  }
+  msa_table %>%
+    dplyr::select(file_stem, cluster_name, sequence_type,
+                  read_name, alignment_score, outlier)
+})
+
+# Combine msa tables
+combined_msa_table <- rbind.fill(flat_msa_tables)
+
+# Summarise alignment score and outliers
+msa_summary <- combined_msa_table %>%
+  group_by(file_stem, cluster_name, sequence_type) %>%
+  dplyr::summarise(read_count = n(),
+                   alignment_score_mean = mean(alignment_score, na.rm = TRUE),
+                   alignment_score_sd = sd(alignment_score, na.rm = TRUE),
+                   alignment_score_sem = alignment_score_sd / sqrt(read_count),
+                   outlier_sum = sum(outlier, na.rm = TRUE),
+                   outlier_proportion = outlier_sum / read_count) %>%
+  ungroup() %>%
+  dplyr::mutate(across(everything(), ~ ifelse(is.nan(.), NA, .)))
+
+# Levels
+msa_summary <- msa_summary %>%
+  dplyr::mutate(cluster_name = fct_relevel(cluster_name,
+                                           sort(unique(cluster_name), decreasing = TRUE)))
+
+# Display table
+kbl(msa_summary, caption = "Multiple sequence alignment summary") %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                  font_size = 8)
+
+```
+
+
+``` {r export_combined_msa_table, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Add full file name
+combined_msa_table <- combined_msa_table %>%
+  dplyr::mutate(file_name = file_details$file_name[match(file_stem, file_details$file_stem)]) %>%
+  relocate(file_name)
+
+# Create directory
+my_path <- file.path(out_dir, "multiple_sequence_alignment")
+if (!dir.exists(my_path)) {
+  dir.create(my_path)
+}
+
+# Export msa tables
+write_excel_function(named_list = list("combined_msa_table" = combined_msa_table),
+                     path = file.path(my_path, "combined_msa_table.xlsx"),
+                     overwrite = TRUE)
+
+```
+
+
+## Multiple sequence alignment scores
+
+``` {r plot_msa_score, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE, fig.height=8, fig.width=10}
+
+ggplot(msa_summary, aes(x = file_stem, y = alignment_score_mean)) +
+  facet_grid(rows = vars(cluster_name)) +
+  geom_jitter(aes(colour = sequence_type),
+              height = 0, width = 0.1, alpha = 0.75, size = 3) +
+  stat_summary(fun = mean, geom = "point", shape = 18, show.legend = FALSE, 
+               colour = "black", size = 4, alpha = 0.75) +
+  stat_summary(fun = mean, geom = "text", 
+               aes(label = after_stat(round(y, 0))),
+               show.legend = FALSE, colour = "black", size = 3,
+               angle = 45, vjust = -0.25, hjust = -0.25) +
+  # scale_x_discrete(labels = function(x) str_wrap(x, width = 50),
+  #                  guide = guide_axis(angle = 70)) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                 guide = guide_axis(angle = 70)) +
+  scale_y_continuous(breaks = pretty_breaks(),
+                     expand = expansion(mult = c(0.1, 0.1))) +
+  labs(title = "Multiple sequence alignment scores",
+       x = "File stem",
+       y = "Mean MSA score",
+       color = "Sequence\ntype") +
+  theme_bw()
+
+```
+  
+## Multiple sequence alignment outliers
+
+``` {r plot_msa_outlier_proportion, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE, fig.height=8, fig.width=10}
+
+ggplot(msa_summary, aes(x = file_stem, y = outlier_proportion)) +
+  facet_grid(rows = vars(cluster_name)) +
+  geom_jitter(aes(colour = sequence_type),
+              height = 0, width = 0.1, alpha = 0.75, size = 3) +
+  stat_summary(fun = mean, geom = "point", shape = 18, show.legend = FALSE, 
+               colour = "black", size = 4, alpha = 0.75) +
+  stat_summary(fun = mean, geom = "text", 
+               aes(label = after_stat(round(y, 2))),
+               show.legend = FALSE, colour = "black", size = 3,
+               angle = 45, vjust = -0.25, hjust = -0.25) +
+  # scale_x_discrete(labels = function(x) str_wrap(x, width = 50),
+  #                  guide = guide_axis(angle = 70)) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("(.{50})", "\\1\n", x), width = 50),
+                 guide = guide_axis(angle = 70)) +
+  scale_y_continuous(breaks = pretty_breaks(),
+                     expand = expansion(mult = c(0.1, 0.1))) +
+  labs(title = "Proportion of reads classed as outliers in MSA",
+       x = "File stem",
+       y = "Proportion of reads",
+       color = "Sequence\ntype") +
+  theme_bw()
+
+```
+
+
+``` {r export_msa_tables, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Export msa tables
+for (file_stem in names(msa_tables)) {
+  table_list <- unlist(msa_tables[[file_stem]], recursive = FALSE)
+  write_excel_function(named_list = table_list,
+                       path = file.path(my_path, paste0(file_stem, ".msa_tables.xlsx")),
+                       overwrite = TRUE)
+  rm(table_list)
+}
+
+```
+
+
+# Save and clean
+
+Save the results and key outputs generated during the analysis, as well as clean up of temporary files and variables.
+
+``` {r objects, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Objects to exclude from save
+excluded_objects <- c("unique_readname_result", "unique_sequencing_files", "trim_result",
+                      "sample_sequencing_files")
+
+# Table of object sizes
+objects <- sapply(ls(), function(x) object.size(get(x)))
+objects <- data.frame(bytes = objects) %>%
+  tibble::rownames_to_column("object") %>%
+  arrange(-bytes) %>%
+  dplyr::mutate(MB = bytes / (1024^2),
+                GB = bytes / (1024^3),
+                include = !object %in% excluded_objects)
+
+# Display
+kbl(objects, caption = "Objects") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+```
+
+
+``` {r save, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Optionally save dataset
+if (save_dataset) {
+  
+  # Create directory
+  my_path <- file.path(out_dir, "save")
+  if (!dir.exists(my_path)) {
+    dir.create(my_path)
+  }
+  
+  # Vector of objects to save
+  save_objects <- setdiff(ls(), excluded_objects)
+  
+  # Save remaining objects if there are any
+  if (length(save_objects) > 0) {
+    save(list = save_objects, file = file.path(my_path, "duke.RData"))
+  } else {
+    message("No objects found to save.")
+  }
+}
+
+```
+
+
+``` {r clean, echo=FALSE, eval=TRUE, message=TRUE, warning=FALSE}
+
+# Temporary directory
+my_path <- file.path(out_dir, "temp")
+
+# Optionally remove temporary files and directory
+if (remove_temp && dir.exists(my_path)) {
+  temp_file_paths <- list.files(my_path, full.names = TRUE)
+  file.remove(temp_file_paths)
+  unlink(my_path)
+  message("Temporary files and directory have been removed")
+} else if (remove_temp && !dir.exists(my_path)) {
+  message("Temporary directory does not exist, nothing to remove.")
+} else {
+  message("Temporary files and directory have been retained.")
+}
+
+```
+
+
+
+

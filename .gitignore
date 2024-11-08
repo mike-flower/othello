@@ -1,0 +1,26 @@
+# Ignore all files and directories
+archive/
+bianca.sh
+brabanzio_1.0.sh
+brabanzio.sh
+clown.sh
+demo/
+duke.sh
+iago.sh
+merge_fastq.R
+montano.sh
+pb_demultiplex.sh
+run_duke_skarnes_custom_plots.R
+skarnes_custom_plots.Rmd
+vcf_filter.sh
+
+# Ignore macOS system files
+.DS_Store
+
+# Ignore R session files
+.RData
+.Rhistory
+
+# Allow these specific files
+!duke.Rmd
+!run_duke.R
