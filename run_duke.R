@@ -14,8 +14,6 @@ getwd()
 #===============================================================================
 # out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results"
 # out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_dev"
-# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_dev2"
-# out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_dev3"
 out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_recolour"
 # out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_readexclusion"
 # out_dir = "/Users/michaelflower/my_bin/othello/demo/2024.10.20_c9orf72/results_recolour_readexclusion"
