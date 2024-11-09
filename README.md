@@ -88,7 +88,7 @@ Each script has detailed usage instructions in the comments. For example:
 
 ## Publication and Citation
 
-The Othello project, including the Duke scripts, is made publicly available following the publication of research utilizing these tools. If you use this repository in your research, please cite:
+The Othello project, including the Duke scripts, is made publicly available following the publication of research utilising these tools. If you use this repository, please cite:
 
 **Michael Flower, UCL Institute of Neurology and UK DRI, London. Research funded by CHDI, UK DRI, and the Movement Disorders Foundation.**
 
